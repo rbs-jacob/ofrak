@@ -174,20 +174,7 @@ source ofrak-venv/bin/activate
 1. Use homebrew to install required libraries and executables:
 
     ```bash
-    brew install \
-      apktool \
-      binwalk \
-      cmake \
-      java \
-      libmagic \
-      lzop \
-      pigz \
-      p7zip \
-      qemu \
-      squashfs \
-      rar \
-      unar \
-      wget
+    brew bundle --verbose
     ```
 
     - OFRAK uses `apktool`, `java`, and `wget` to install `uber-apk-signer` for unpacking and packing APK files.
