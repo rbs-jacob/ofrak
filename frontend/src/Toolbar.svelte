@@ -37,11 +37,13 @@
 
 <script>
   import Icon from "./Icon.svelte";
+  import Logo from "./Logo.svelte";
 
   export let toolbarButtons;
 </script>
 
 <div class="vbox">
+  <Logo />
   {#each toolbarButtons as button}
     <button
       on:click="{async (e) => {
