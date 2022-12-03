@@ -33,6 +33,13 @@
     box-shadow: inset 2px 2px 0 var(--main-fg-color),
       inset -2px -2px 0 var(--main-fg-color);
   }
+
+  .sticky {
+    position: sticky;
+    top: 0;
+    background: var(--main-bg-color);
+    z-index: 9999;
+  }
 </style>
 
 <script>
@@ -43,7 +50,9 @@
 </script>
 
 <div class="vbox">
-  <Logo />
+  <div class="sticky">
+    <Logo />
+  </div>
   {#each toolbarButtons as button}
     <button
       on:click="{async (e) => {

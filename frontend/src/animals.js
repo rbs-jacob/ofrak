@@ -1,27 +1,27 @@
 export const animals = [
   {
     name: "thicccat",
-    src: "images/square_01.png",
+    src: "/images/t1.svg",
     color: "#FD962C",
   },
   {
     name: "crankypillar",
-    src: "images/square_02.png",
+    src: "/images/t3.svg",
     color: "#A9ED96",
   },
   {
     name: "shroomboi",
-    src: "images/square_03.png",
+    src: "/images/t2.svg",
     color: "#FAA183",
   },
   {
     name: "tortle",
-    src: "images/square_04.png",
+    src: "/images/t4.svg",
     color: "#C6F562",
   },
   {
     name: "snekk",
-    src: "images/square_05.png",
+    src: "/images/t5.svg",
     color: "#FFF259",
   },
 ];
