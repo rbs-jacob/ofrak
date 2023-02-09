@@ -1,7 +1,7 @@
 <style>
   .hbox {
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     flex-wrap: nowrap;
     justify-content: flex-start;
     align-items: stretch;
@@ -13,8 +13,9 @@
     position: sticky;
     top: 0;
     left: 0;
-    padding-right: 1em;
-    min-width: 18ch;
+    width: 100%;
+    margin-bottom: 1em;
+    min-height: 3em;
   }
 
   .hbox,

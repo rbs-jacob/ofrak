@@ -1,18 +1,16 @@
 <style>
-  .vbox {
+  .hbox {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     flex-wrap: nowrap;
     justify-content: flex-start;
     align-items: stretch;
+    width: 100%;
   }
 
   button {
-    margin-bottom: 1em;
-    padding-top: 0.5em;
-    padding-bottom: 0.5em;
-    padding-left: 1em;
-    padding-right: 1em;
+    margin: 0.25em;
+    padding: 0.75em 0.5em 0.5em 0.5em;
     background-color: var(--main-bg-color);
     color: var(--main-fg-color);
     border: 1px solid var(--main-fg-color);
@@ -41,7 +39,7 @@
   export let toolbarButtons;
 </script>
 
-<div class="vbox">
+<div class="hbox">
   {#each toolbarButtons as button}
     <button
       on:click="{async (e) => {
@@ -67,7 +65,6 @@
       {#if button.iconUrl}
         <Icon url="{button.iconUrl}" />
       {/if}
-      {button.text}
     </button>
   {/each}
 </div>
