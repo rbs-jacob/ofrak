@@ -23,7 +23,6 @@
     toolbarButtons = [
       {
         text: "Identify",
-        symbol: "i",
         iconUrl: "/icons/identify.svg",
         onclick: async (e) => {
           await rootResource.identify();
@@ -37,7 +36,6 @@
 
       {
         text: "Unpack",
-        symbol: "u",
         iconUrl: "/icons/unpack.svg",
         onclick: async (e) => {
           await rootResource.unpack();
@@ -59,7 +57,6 @@
 
       {
         text: "Analyze",
-        symbol: "a",
         iconUrl: "/icons/analyze.svg",
         onclick: async (e) => {
           await rootResource.analyze();
@@ -81,7 +78,6 @@
 
       {
         text: "Pack",
-        symbol: "p",
         iconUrl: "/icons/pack.svg",
         onclick: async (e) => {
           await rootResource.pack();
@@ -152,7 +148,6 @@
 
       {
         text: "New",
-        symbol: "n",
         iconUrl: "/icons/new.svg",
         onclick: (e) => {
           // Clear the URL fragment
@@ -162,7 +157,6 @@
 
       {
         text: "Unpack Recursively",
-        symbol: "U",
         iconUrl: "/icons/unpack_r.svg",
         onclick: async (e) => {
           await rootResource.unpack_recursively();
@@ -176,7 +170,6 @@
 
       {
         text: "Pack Recursively",
-        symbol: "P",
         iconUrl: "/icons/pack_r.svg",
         onclick: async (e) => {
           await rootResource.pack_recursively();

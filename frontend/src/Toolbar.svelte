@@ -44,14 +44,11 @@
     <button
       on:click="{async (e) => {
         const oldIcon = button.iconUrl;
-        const oldSymbol = button.symbol;
         button.iconUrl = '/icons/loading.svg';
-        button.symbol = undefined;
         await button
           .onclick(e)
           .then((_) => {
             button.iconUrl = oldIcon;
-            button.symbol = oldSymbol;
           })
           .catch((e) => {
             button.iconUrl = '/icons/error.svg';
@@ -65,12 +62,8 @@
           });
       }}"
     >
-      {#if button.symbol}
-        {button.symbol}
-      {:else if button.iconUrl}
+      {#if button.iconUrl}
         <Icon url="{button.iconUrl}" />
-      {:else}
-        {button.text}
       {/if}
     </button>
   {/each}
