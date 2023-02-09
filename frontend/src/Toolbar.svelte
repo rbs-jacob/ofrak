@@ -37,6 +37,8 @@
   import Hoverable from "./Hoverable.svelte";
   import Icon from "./Icon.svelte";
 
+  import { shortcuts } from "./keyboard.js";
+
   export let toolbarButtons;
   let hovering;
 
@@ -51,31 +53,54 @@
       },
     };
   }
+
+  /***
+   * Show the loading spinner while an async onclick function does its thing.
+   */
+  function wrapOnCick(button) {
+    return async (e) => {
+      const oldIcon = button.iconUrl;
+      button.iconUrl = "/icons/loading.svg";
+      toolbarButtons = toolbarButtons;
+      await button
+        .onclick(e)
+        .then((_) => {
+          button.iconUrl = oldIcon;
+          toolbarButtons = toolbarButtons;
+        })
+        .catch((e) => {
+          button.iconUrl = "/icons/error.svg";
+          toolbarButtons = toolbarButtons;
+          try {
+            let errorObject = JSON.parse(e.message);
+            alert(`${errorObject.type}: ${errorObject.message}`);
+          } catch {
+            alert(e);
+          }
+          console.error(e);
+        });
+    };
+  }
+
+  $: Array.from(toolbarButtons).forEach((button) => {
+    if (!button.shortcut) {
+      return;
+    }
+    shortcuts[button.shortcut] = wrapOnCick(button);
+  });
 </script>
 
 <div class="hbox">
   {#each toolbarButtons as button}
     <Hoverable let:hovering>
       <button
-        on:click="{async (e) => {
-          const oldIcon = button.iconUrl;
-          button.iconUrl = '/icons/loading.svg';
-          await button
-            .onclick(e)
-            .then((_) => {
-              button.iconUrl = oldIcon;
-            })
-            .catch((e) => {
-              button.iconUrl = '/icons/error.svg';
-              try {
-                let errorObject = JSON.parse(e.message);
-                alert(`${errorObject.type}: ${errorObject.message}`);
-              } catch {
-                alert(e);
-              }
-              console.error(e);
-            });
-        }}"
+        on:click="{wrapOnCick(button)}"
+        title="{button.text +
+          (button.shortcut
+            ? ' (Shortcut key: ' +
+              button.shortcut.split('+').reverse().join(' + ') +
+              ')'
+            : '')}"
       >
         {#if button.iconUrl}
           <Icon url="{button.iconUrl}" />
