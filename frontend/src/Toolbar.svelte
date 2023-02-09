@@ -34,37 +34,56 @@
 </style>
 
 <script>
+  import Hoverable from "./Hoverable.svelte";
   import Icon from "./Icon.svelte";
 
   export let toolbarButtons;
+  let hovering;
+
+  function slide(node, { speed = 1 }) {
+    const text = node.innerText;
+    const duration = text.length / (speed * 0.1);
+
+    return {
+      duration,
+      tick: (t) => {
+        node.innerText = text.slice(0, Math.floor(text.length * t));
+      },
+    };
+  }
 </script>
 
 <div class="hbox">
   {#each toolbarButtons as button}
-    <button
-      on:click="{async (e) => {
-        const oldIcon = button.iconUrl;
-        button.iconUrl = '/icons/loading.svg';
-        await button
-          .onclick(e)
-          .then((_) => {
-            button.iconUrl = oldIcon;
-          })
-          .catch((e) => {
-            button.iconUrl = '/icons/error.svg';
-            try {
-              let errorObject = JSON.parse(e.message);
-              alert(`${errorObject.type}: ${errorObject.message}`);
-            } catch {
-              alert(e);
-            }
-            console.error(e);
-          });
-      }}"
-    >
-      {#if button.iconUrl}
-        <Icon url="{button.iconUrl}" />
-      {/if}
-    </button>
+    <Hoverable let:hovering>
+      <button
+        on:click="{async (e) => {
+          const oldIcon = button.iconUrl;
+          button.iconUrl = '/icons/loading.svg';
+          await button
+            .onclick(e)
+            .then((_) => {
+              button.iconUrl = oldIcon;
+            })
+            .catch((e) => {
+              button.iconUrl = '/icons/error.svg';
+              try {
+                let errorObject = JSON.parse(e.message);
+                alert(`${errorObject.type}: ${errorObject.message}`);
+              } catch {
+                alert(e);
+              }
+              console.error(e);
+            });
+        }}"
+      >
+        {#if button.iconUrl}
+          <Icon url="{button.iconUrl}" />
+        {/if}
+        {#if hovering}
+          <span transition:slide>{button.text}</span>
+        {/if}
+      </button>
+    </Hoverable>
   {/each}
 </div>
