@@ -2,7 +2,7 @@ import pytest
 
 from ofrak_patch_maker_test import ToolchainUnderTest
 
-from ofrak_patch_maker.toolchain.gnu_ppc import GNU_PPC_LINUX_10_Toolchain
+from ofrak_patch_maker.toolchain.gnu_ppc import GNU_PPC_LINUX_10_Toolchain, GNU_PPCVLE_4_Toolchain
 from ofrak_type import ArchInfo, InstructionSet, BitWidth, Endianness
 
 from ofrak_patch_maker_test.toolchain_asm import (
@@ -21,6 +21,17 @@ PPC_EXTENSION = ".ppc"
     params=[
         ToolchainUnderTest(
             GNU_PPC_LINUX_10_Toolchain,
+            ArchInfo(
+                InstructionSet.PPC,
+                None,
+                BitWidth.BIT_32,
+                Endianness.BIG_ENDIAN,
+                None,
+            ),
+            PPC_EXTENSION,
+        ),
+        ToolchainUnderTest(
+            GNU_PPCVLE_4_Toolchain,
             ArchInfo(
                 InstructionSet.PPC,
                 None,
