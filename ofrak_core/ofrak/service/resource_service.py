@@ -748,6 +748,37 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
     )
 
 
+def _delete_resources(
+    resource_ids: Iterable[bytes], conn: sqlite3.Connection
+) -> Iterable[ResourceModel]:
+    result = set()
+    for resource_id in resource_ids:
+        children_ids = [
+            child_id
+            for (child_id,) in conn.execute(
+                "SELECT resource_id FROM resources WHERE resources.parent_id = ?", (resource_id,)
+            )
+        ]
+        result.update(_delete_resources(children_ids, conn))
+        result.add(_get_model_by_id(resource_id, conn))
+        conn.execute("DELETE FROM resources WHERE resources.resource_id = ?", (resource_id,))
+    return result
+
+
+def _get_descendants(
+    resource_id: bytes,
+    conn: sqlite3.Connection,
+) -> Iterable[ResourceModel]:
+    # TODO: Use WITH RECURSIVE in query?
+    descendants = []
+    for (descendant_id,) in conn.execute(
+        "SELECT resource_id FROM resources WHERE resources.parent_id = ?", (resource_id,)
+    ):
+        descendants.extend(_get_descendants(descendant_id, conn))
+    descendants.append(_get_model_by_id(resource_id, conn))
+    return descendants
+
+
 class ResourceService(ResourceServiceInterface):
     def __int__(self):
         self._conn = sqlite3.connect(":memory:")
@@ -838,16 +869,35 @@ class ResourceService(ResourceServiceInterface):
         with self._conn as conn:
             return [
                 _get_model_by_id(root_id, conn)
-                for root_id in conn.execute(
+                for (root_id,) in conn.execute(
                     "SELECT resource_id FROM resources WHERE resources.parent_id IS NULL"
                 )
             ]
 
     async def verify_ids_exist(self, resource_ids: Iterable[bytes]) -> Iterable[bool]:
-        pass
+        with self._conn as conn:
+            return [
+                (
+                    True
+                    if conn.execute(
+                        "SELECT resource_id FROM resources WHERE resources.resource_id = ?",
+                        (resource_id,),
+                    )
+                    else False
+                )
+                for resource_id in resource_ids
+            ]
 
     async def get_by_data_ids(self, data_ids: Iterable[bytes]) -> Iterable[ResourceModel]:
-        pass
+        with self._conn as conn:
+            resource_ids = [
+                conn.execute(
+                    "SELECT resource_id FROM resources WHERE resources.data_id = ?",
+                    (data_id,),
+                ).fetchone()[0]
+                for data_id in data_ids
+            ]
+        return await self.get_by_ids(resource_ids)
 
     async def get_by_ids(self, resource_ids: Iterable[bytes]) -> Iterable[ResourceModel]:
         # TODO: Optimize
@@ -859,12 +909,27 @@ class ResourceService(ResourceServiceInterface):
             return _get_model_by_id(resource_id, conn)
 
     async def get_depths(self, resource_ids: Iterable[bytes]) -> Iterable[int]:
-        pass
+        return [
+            len(list(await self.get_ancestors_by_id(resource_id))) for resource_id in resource_ids
+        ]
 
     async def get_ancestors_by_id(
         self, resource_id: bytes, max_count: int = -1, r_filter: Optional[ResourceFilter] = None
     ) -> Iterable[ResourceModel]:
-        pass
+        if r_filter:
+            # TODO
+            raise NotImplementedError()
+        # TODO: Use WITH RECURSIVE in query?
+        ancestors = []
+        with self._conn as conn:
+            while resource_id and max_count == -1 or len(ancestors) < max_count:
+                (parent_id,) = conn.execute(
+                    "SELECT parent_id FROM resources WHERE resources.resource_id = ?",
+                    (resource_id,),
+                ).fetchone()
+                ancestors.append(_get_model_by_id(parent_id, conn))
+                resource_id = parent_id
+        return ancestors
 
     async def get_descendants_by_id(
         self,
@@ -874,7 +939,8 @@ class ResourceService(ResourceServiceInterface):
         r_filter: Optional[ResourceFilter] = None,
         r_sort: Optional[ResourceSort] = None,
     ) -> Iterable[ResourceModel]:
-        pass
+        with self._conn as conn:
+            return _get_descendants(resource_id, conn)
 
     async def get_siblings_by_id(
         self,
@@ -883,7 +949,20 @@ class ResourceService(ResourceServiceInterface):
         r_filter: Optional[ResourceFilter] = None,
         r_sort: Optional[ResourceSort] = None,
     ) -> Iterable[ResourceModel]:
-        pass
+        if max_count != -1 or r_filter or r_sort:
+            # TODO
+            raise NotImplementedError()
+        with self._conn as conn:
+            (parent_id,) = conn.execute(
+                "SELECT parent_id FROM resources WHERE resources.resource_id = ?", (resource_id,)
+            ).fetchone()
+            return [
+                _get_model_by_id(sibling_id, conn)
+                for (sibling_id,) in conn.execute(
+                    "SELECT resource_id FROM resources WHERE resources.parent_id = ? AND resources.resource_id != ?",
+                    (parent_id, resource_id),
+                )
+            ]
 
     async def update(self, resource_diff: ResourceModelDiff) -> ResourceModel:
         pass
@@ -894,10 +973,15 @@ class ResourceService(ResourceServiceInterface):
         pass
 
     async def rebase_resource(self, resource_id: bytes, new_parent_id: bytes):
-        pass
+        with self._conn as conn:
+            conn.execute(
+                "UPDATE resources SET parent_id = ? WHERE resources.resource_id = ?",
+                (new_parent_id, resource_id),
+            )
 
     async def delete_resource(self, resource_id: bytes) -> Iterable[ResourceModel]:
-        pass
+        return await self.delete_resources([resource_id])
 
     async def delete_resources(self, resource_ids: Iterable[bytes]) -> Iterable[ResourceModel]:
-        pass
+        with self._conn as conn:
+            return _delete_resources(resource_ids, conn)
