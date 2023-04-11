@@ -1,7 +1,8 @@
 import bisect
-import itertools
+import inspect
 import logging
-import math
+import sqlite3
+
 import sys
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -13,6 +14,7 @@ from ofrak.model.resource_model import (
     ResourceModel,
     ResourceModelDiff,
     ResourceIndexedAttribute,
+    ResourceAttributeDependency,
 )
 from ofrak.model.tag_model import ResourceTag
 from ofrak.service.resource_service_i import (
@@ -27,7 +29,6 @@ from ofrak.service.resource_service_i import (
     ResourceFilterCondition,
     ResourceServiceWalkError,
 )
-from ofrak_type.error import NotFoundError, AlreadyExistError
 from ofrak_type.range import Range
 
 LOGGER = logging.getLogger(__name__)
@@ -665,148 +666,205 @@ class AggregateResourceFilterLogic:
         return True
 
 
+def _type_to_str(t: type) -> str:
+    return f"{inspect.getmodule(t).__name__}.{t.__name__}"
+
+
+def _type_from_str(t: str) -> type:
+    # Taken from type_serializer.py in the serialization service
+    module_path, cls_name = t.rsplit(".", maxsplit=1)
+    module = sys.modules[module_path]
+    return getattr(module, cls_name)
+
+
+def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceModel:
+    data_id, parent_id = next(
+        conn.execute(
+            "SELECT data_id, parent_id FROM resources WHERE resources.id = ?", (resource_id,)
+        )
+    )
+    tags = set()
+    for (tag_name,) in conn.execute(
+        "SELECT tag FROM tags WHERE tags.resource_id = ?", (resource_id,)
+    ):
+        tags.add(_type_from_str(tag_name))
+    attributes = dict()
+    for (attributes_type, attribute) in conn.execute(
+        "SELECT attributes_type, attribute FROM attributes WHERE attributes.resource_id = ?",
+        (resource_id,),
+    ):
+        attributes[_type_from_str(attributes_type)] = attribute
+    data_dependencies = defaultdict(default_factory=set)
+    for (
+        dependent_resource_id,
+        component_id,
+        attributes_type,
+        range_start,
+        range_end,
+    ) in conn.execute(
+        "SELECT dependent_resource_id, component_id, attributes_type, range_start, range_end FROM data_depedencies WHERE data_dependencies.resource_id = ?",
+        (resource_id,),
+    ):
+        r = Range(range_start, range_end)
+        # TODO: Fix typing
+        attr_dep = ResourceAttributeDependency(
+            dependent_resource_id, component_id, _type_from_str(attributes_type)
+        )
+        data_dependencies[attr_dep].add(r)
+    attribute_dependencies = defaultdict(default_factory=set)
+    for (attributes_type, dependent_resource_id, component_id) in conn.execute(
+        "SELECT attributes_type, dependent_resource_id, component_id FROM attribute_dependencies WHERE attribute_dependencies.resource_id = ?",
+        (resource_id,),
+    ):
+        # TODO: Fix typing
+        deserialized_type = _type_from_str(attributes_type)
+        attr_dep = ResourceAttributeDependency(
+            dependent_resource_id, component_id, deserialized_type
+        )
+        attribute_dependencies[deserialized_type] = attr_dep
+    component_versions = dict(
+        conn.execute(
+            "SELECT component_id, component_version FROM component_versions WHERE component_verisons.resource_id = ?",
+            (resource_id,),
+        )
+    )
+    components_by_attributes = {
+        _type_from_str(attributes_type): (component_id, component_version)
+        for attributes_type, component_id, component_version in conn.execute(
+            "SELECT attributes_type, component_id, version FROM components_by_attributes WHERE components_by_attributes.resource_id = ?",
+            (resource_id,),
+        )
+    }
+    return ResourceModel(
+        id=resource_id,
+        data_id=data_id,
+        parent_id=parent_id,
+        tags=tags,
+        attributes=attributes,
+        data_dependencies=data_dependencies,
+        attribute_dependencies=attribute_dependencies,
+        component_versions=component_versions,
+        components_by_attributes=components_by_attributes,
+    )
+
+
 class ResourceService(ResourceServiceInterface):
-    def __init__(self):
-        self._resource_store: Dict[bytes, ResourceNode] = dict()
-        self._resource_by_data_id_store: Dict[bytes, ResourceNode] = dict()
-        self._attribute_indexes: Dict[
-            ResourceIndexedAttribute[T], ResourceAttributeIndex[T]
-        ] = AttributeIndexDict(ResourceAttributeIndex)
-        self._tag_indexes: Dict[ResourceTag, Set[ResourceNode]] = defaultdict(set)
-        self._root_resources: Dict[bytes, ResourceNode] = dict()
-
-    def _add_resource_tag_to_index(self, tag: ResourceTag, resource: ResourceNode):
-        for _tag in tag.tag_classes():
-            self._tag_indexes[_tag].add(resource)
-
-    def _remove_resource_tag_from_index(
-        self,
-        tag: ResourceTag,
-        resource: ResourceNode,
-        blacklist: Set[ResourceTag],
-    ):
-        for _tag in tag.tag_classes():
-            if blacklist is not None and _tag in blacklist:
-                continue
-            self._tag_indexes[_tag].remove(resource)
-
-    def _add_resource_attribute_to_index(
-        self,
-        indexable_attribute: ResourceIndexedAttribute[T],
-        value: T,
-        resource: ResourceNode,
-    ):
-        if value is None:
-            return
-        index = self._attribute_indexes[indexable_attribute]
-        index.add_resource_attribute(value, resource)
-
-        for dependent_indexable in indexable_attribute.used_by_indexes:
-            dependant_value = dependent_indexable.get_value(resource.model)
-            self._add_resource_attribute_to_index(dependent_indexable, dependant_value, resource)
-
-    def _remove_resource_attribute_from_index(
-        self,
-        indexable_attribute: ResourceIndexedAttribute[T],
-        resource: ResourceNode,
-    ):
-        index = self._attribute_indexes[indexable_attribute]
-        index.remove_resource_attribute(resource)
-        for dependent_indexable in indexable_attribute.used_by_indexes:
-            self._remove_resource_attribute_from_index(dependent_indexable, resource)
+    def __int__(self):
+        self._conn = sqlite3.connect(":memory:")
+        with self._conn as conn:
+            conn.execute("CREATE TABLE resources (id PRIMARY KEY, data_id, parent_id)")
+            conn.execute("CREATE TABLE tags (resource_id, tag)")
+            conn.execute(
+                "CREATE TABLE attributes (id INTEGER PRIMARY KEY, resource_id, attributes_type, attribute)"
+            )
+            conn.execute(
+                "CREATE TABLE data_dependencies (resource_id, dependent_resource_id, component_id, attributes_type, range_start, range_end)"
+            )
+            conn.execute(
+                "CREATE TABLE attribute_dependencies (resource_id, attributes_type, dependent_resource_id, component_id)"
+            )
+            conn.execute(
+                "CREATE TABLE component_versions (resource_id, component_id, component_version)"
+            )
+            conn.execute(
+                "CREATE TABLE components_by_attributes (resource_id, attributes_type, component_id, version)"
+            )
 
     async def create(self, resource: ResourceModel) -> ResourceModel:
-        if resource.id in self._resource_store:
-            raise AlreadyExistError(f"A resource with id {resource.id.hex()} already exists!")
-        if resource.parent_id is not None:
-            parent_resource_node = self._resource_store.get(resource.parent_id)
-            if parent_resource_node is None:
-                raise NotFoundError(
-                    f"The parent resource with id {resource.parent_id.hex()} does not exist"
-                )
-            LOGGER.debug(
-                f"Creating resource {resource.id.hex()} as child of {resource.parent_id.hex()}"
+        with self._conn as conn:
+            conn.execute(
+                "INSERT INTO resources VALUES(?, ?, ?)",
+                (resource.id, resource.data_id, resource.parent_id),
             )
-        else:
-            parent_resource_node = None
-            LOGGER.debug(f"Creating resource {resource.id.hex()}")
-        resource_node = ResourceNode(resource, parent_resource_node)
-        self._resource_store[resource.id] = resource_node
-        if resource.data_id is not None:
-            self._resource_by_data_id_store[resource.data_id] = resource_node
-        if parent_resource_node is None:
-            self._root_resources[resource.id] = resource_node
-
-        # Take care of the indexes
-        for tag in resource.tags:
-            self._add_resource_tag_to_index(tag, resource_node)
-        for indexable_attribute, value in resource.get_index_values().items():
-            self._add_resource_attribute_to_index(indexable_attribute, value, resource_node)
+            conn.executemany(
+                "INSERT INTO tags VALUES(?, ?)",
+                [(resource.id, _type_to_str(tag)) for tag in resource.tags],
+            )
+            conn.executemany(
+                "INSERT INTO attributes VALUES(?, ?, ?)",
+                [
+                    (resource.id, _type_to_str(type(attribute)), None)  # TODO: Serialize attribute
+                    for attribute in resource.attributes
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO data_dependencies VALUES(?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        resource.id,
+                        dep.dependent_resource_id,
+                        dep.component_id,
+                        dep.attributes,
+                        data_range.start,
+                        data_range.end,
+                    )
+                    for dep, ranges in resource.data_dependencies.items()
+                    for data_range in ranges
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO attribute_dependencies VALUES(?, ?, ?, ?)",
+                [
+                    (
+                        resource.id,
+                        _type_to_str(attributes_type),
+                        dep.dependent_resource_id,
+                        dep.component_id,
+                    )
+                    for attributes_type, attribute_dependencies in resource.attribute_dependencies.items()
+                    for dep in attribute_dependencies
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO component_versions VALUES(?, ?, ?)",
+                [
+                    (resource.id, component_id, component_version)
+                    for component_id, component_version in resource.component_versions.items()
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO components_by_attributes VALUES(?, ?, ?, ?)",
+                [
+                    (resource.id, _type_to_str(attributes_type), component_id, component_version)
+                    for attributes_type, (
+                        component_id,
+                        component_version,
+                    ) in resource.components_by_attributes.items()
+                ],
+            )
         return resource
 
-    async def get_root_resources(self) -> List[ResourceModel]:
-        return [root_node.model for root_node in self._root_resources.values()]
+    async def get_root_resources(self) -> Iterable[ResourceModel]:
+        with self._conn as conn:
+            return [
+                _get_model_by_id(root_id, conn)
+                for root_id in conn.execute(
+                    "SELECT resource_id FROM resources WHERE resources.parent_id IS NULL"
+                )
+            ]
 
     async def verify_ids_exist(self, resource_ids: Iterable[bytes]) -> Iterable[bool]:
-        return [resource_id in self._resource_store for resource_id in resource_ids]
+        pass
 
     async def get_by_data_ids(self, data_ids: Iterable[bytes]) -> Iterable[ResourceModel]:
-        results = []
-        for data_id in data_ids:
-            resource_node = self._resource_by_data_id_store.get(data_id)
-            if resource_node is None:
-                raise NotFoundError(f"The resource with data ID {data_id.hex()} does not exist")
-            results.append(resource_node.model)
-        return results
+        pass
 
     async def get_by_ids(self, resource_ids: Iterable[bytes]) -> Iterable[ResourceModel]:
-        results = []
-        for resource_id in resource_ids:
-            resource_node = self._resource_store.get(resource_id)
-            if resource_node is None:
-                raise NotFoundError(f"The resource {resource_id.hex()} does not exist")
-            results.append(resource_node.model)
-        return results
+        # TODO: Optimize
+        with self._conn as conn:
+            return [_get_model_by_id(resource_id, conn) for resource_id in resource_ids]
 
     async def get_by_id(self, resource_id: bytes) -> ResourceModel:
-        LOGGER.debug(f"Fetching resource {resource_id.hex()}")
-        resource_node = self._resource_store.get(resource_id)
-        if resource_node is None:
-            raise NotFoundError(f"The resource {resource_id.hex()} does not exist")
-        return resource_node.model
+        with self._conn as conn:
+            return _get_model_by_id(resource_id, conn)
 
     async def get_depths(self, resource_ids: Iterable[bytes]) -> Iterable[int]:
-        results = []
-        for resource_id in resource_ids:
-            resource_node = self._resource_store.get(resource_id)
-            if resource_node is None:
-                raise NotFoundError(f"The resource {resource_id.hex()} does not exist")
-            results.append(resource_node.get_depth())
-        return results
+        pass
 
     async def get_ancestors_by_id(
-        self,
-        resource_id: bytes,
-        max_count: int = -1,
-        r_filter: Optional[ResourceFilter] = None,
+        self, resource_id: bytes, max_count: int = -1, r_filter: Optional[ResourceFilter] = None
     ) -> Iterable[ResourceModel]:
-        LOGGER.debug(f"Fetching ancestor(s) of {resource_id.hex()}")
-        resource_node = self._resource_store.get(resource_id)
-        if resource_node is None:
-            raise NotFoundError(f"The resource {resource_id.hex()} does not exist")
-        r_filter_logic = AggregateResourceFilterLogic.create(
-            r_filter,
-            self._tag_indexes,
-            self._attribute_indexes,
-        )
-        include_root = False if r_filter is None else r_filter.include_self
-        resources = map(
-            lambda n: n.model,
-            filter(r_filter_logic.filter, resource_node.walk_ancestors(include_root)),
-        )
-        if max_count < 0:
-            return resources
-        return itertools.islice(resources, 0, max_count)
+        pass
 
     async def get_descendants_by_id(
         self,
@@ -816,64 +874,7 @@ class ResourceService(ResourceServiceInterface):
         r_filter: Optional[ResourceFilter] = None,
         r_sort: Optional[ResourceSort] = None,
     ) -> Iterable[ResourceModel]:
-        # LOGGER.debug(f"Fetching descendant(s) of {resource_id.hex()}")
-        resource_node = self._resource_store.get(resource_id)
-        if resource_node is None:
-            raise NotFoundError(f"The resource {resource_id.hex()} does not exist")
-
-        aggregate_sort_logic = ResourceSortLogic.create(r_sort, self._attribute_indexes)
-        aggregate_filter_logic = AggregateResourceFilterLogic.create(
-            r_filter, self._tag_indexes, self._attribute_indexes, resource_node, max_depth
-        )
-        # This is the planning phase used to determine the best index to use for further filtering
-        filter_logic: Optional[ResourceFilterLogic] = None
-        filter_cost = sys.maxsize
-        sort_cost = sys.maxsize
-        if aggregate_sort_logic.has_effect():
-            sort_cost = aggregate_sort_logic.get_match_count()
-            if sort_cost == 0:
-                return tuple()
-
-        for _filter_logic in aggregate_filter_logic.filters:
-            _filter_cost = _filter_logic.get_match_count()
-            if _filter_cost == 0:
-                return tuple()
-            if (
-                aggregate_sort_logic.has_effect()
-                and aggregate_sort_logic.get_attribute() != _filter_logic.get_attribute()
-            ):
-                # The resources matching the filter would need to get sorted, making the
-                # worst case # scenario more expensive
-                _filter_cost = int(_filter_cost * math.log2(_filter_cost))
-            if _filter_cost < filter_cost:
-                filter_cost = _filter_cost
-                filter_logic = _filter_logic
-
-        # Use the estimated cost to pick the fastest way to compute the results
-        if (
-            filter_logic is not None
-            and filter_logic.get_attribute() is not None
-            and filter_logic.get_attribute() == aggregate_sort_logic.get_attribute()
-        ):
-            resource_nodes = filter_logic.walk(aggregate_sort_logic.get_direction())
-            aggregate_filter_logic.ignore_filter(filter_logic)
-            aggregate_sort_logic = NullResourceSortLogic()
-        elif sort_cost < filter_cost:
-            resource_nodes = aggregate_sort_logic.walk()
-            aggregate_sort_logic = NullResourceSortLogic()
-        elif filter_logic is not None:
-            resource_nodes = filter_logic.walk(ResourceSortDirection.ASCENDANT)
-            # No need to filter on that index since it serves as the root index
-            aggregate_filter_logic.ignore_filter(filter_logic)
-
-        if aggregate_filter_logic.has_effect():
-            resource_nodes = filter(aggregate_filter_logic.filter, resource_nodes)
-        resources: Iterable[ResourceModel] = map(lambda n: n.model, resource_nodes)
-        if aggregate_sort_logic.has_effect():
-            resources = aggregate_sort_logic.sort(resources)
-        if max_count >= 0:
-            resources = itertools.islice(resources, 0, max_count)
-        return resources
+        pass
 
     async def get_siblings_by_id(
         self,
@@ -882,127 +883,21 @@ class ResourceService(ResourceServiceInterface):
         r_filter: Optional[ResourceFilter] = None,
         r_sort: Optional[ResourceSort] = None,
     ) -> Iterable[ResourceModel]:
-        resource_node = self._resource_store.get(resource_id)
-        if resource_node is None:
-            raise NotFoundError(f"The resource {resource_id.hex()} does not exist")
-        if resource_node.parent is None:
-            raise NotFoundError(
-                f"The resource {resource_id.hex()} does not have siblings as it is a root "
-                f"resource."
-            )
-        return await self.get_descendants_by_id(
-            resource_node.parent.model.id, max_count, 1, r_filter, r_sort
-        )
+        pass
 
     async def update(self, resource_diff: ResourceModelDiff) -> ResourceModel:
-        return self._update(resource_diff)
+        pass
 
     async def update_many(
         self, resource_diffs: Iterable[ResourceModelDiff]
     ) -> Iterable[ResourceModel]:
-        return [self._update(resource_diff) for resource_diff in resource_diffs]
-
-    def _update(self, resource_diff: ResourceModelDiff) -> ResourceModel:
-        LOGGER.debug(f"Saving resource {resource_diff.id.hex()}")
-        resource_node = self._resource_store.get(resource_diff.id)
-        if resource_node is None:
-            raise NotFoundError(f"The resource with ID {resource_diff.id.hex()} does not exist")
-
-        prev_resource = resource_node.model
-        next_resource = resource_diff.apply(prev_resource)
-
-        current_tags = next_resource.get_tags()
-        # Update the tag indexes
-        for tag_removed in resource_diff.tags_removed:
-            self._remove_resource_tag_from_index(tag_removed, resource_node, set(current_tags))
-        for tag_added in resource_diff.tags_added:
-            self._add_resource_tag_to_index(tag_added, resource_node)
-
-        # Update the attribute indexes
-        indexable_attributes_removed = set()
-        for attributes_removed in resource_diff.attributes_removed:
-            for indexable_attribute_removed in attributes_removed.get_indexable_attributes():
-                indexable_attributes_removed.add(indexable_attribute_removed)
-                self._remove_resource_attribute_from_index(
-                    indexable_attribute_removed, resource_node
-                )
-
-        indexable_attributes_added = set()
-        for attributes_type_added, attributes_added in resource_diff.attributes_added.items():
-            for indexable_attribute_added in attributes_added.get_indexable_attributes():
-                indexable_attributes_added.add(indexable_attribute_added)
-                self._add_resource_attribute_to_index(
-                    indexable_attribute_added,
-                    indexable_attribute_added.get_value(next_resource),
-                    resource_node,
-                )
-
-        resource_node.model = next_resource
-        return next_resource
+        pass
 
     async def rebase_resource(self, resource_id: bytes, new_parent_id: bytes):
-        resource_node = self._resource_store.get(resource_id)
-        if resource_node is None:
-            raise NotFoundError(f"The resource {resource_id.hex()} does not exist")
+        pass
 
-        new_parent_resource_node = self._resource_store.get(new_parent_id)
-        if new_parent_resource_node is None:
-            raise NotFoundError(f"The new parent resource {resource_id.hex()} does not exist")
+    async def delete_resource(self, resource_id: bytes) -> Iterable[ResourceModel]:
+        pass
 
-        former_parent_resource_node = resource_node.parent
-        if former_parent_resource_node is not None:
-            former_parent_resource_node.remove_child(resource_node)
-        new_parent_resource_node.add_child(resource_node)
-        resource_node.parent = new_parent_resource_node
-        resource_node.model.parent_id = new_parent_id
-
-    async def delete_resource(self, resource_id: bytes):
-        resource_node = self._resource_store.get(resource_id)
-        if resource_node is None:
-            # Already deleted, probably by an ancestor calling the recursive func below
-            return []
-
-        former_parent_resource_node = resource_node.parent
-        if former_parent_resource_node is not None:
-            former_parent_resource_node.remove_child(resource_node)
-
-        deleted_models = self._delete_resource_helper(resource_node)
-        LOGGER.debug(f"Deleted {resource_id.hex()}")
-        return deleted_models
-
-    async def delete_resources(self, resource_ids: Iterable[bytes]):
-        deleted_models = []
-        for resource_id in resource_ids:
-            resource_node = self._resource_store.get(resource_id)
-            if resource_node is None:
-                # Already deleted, probably by an ancestor calling the recursive func below
-                continue
-
-            former_parent_resource_node = resource_node.parent
-            if former_parent_resource_node is not None:
-                former_parent_resource_node.remove_child(resource_node)
-
-            deleted_models.extend(self._delete_resource_helper(resource_node))
-        if resource_ids:
-            LOGGER.debug(f"Deleted {', '.join(resource_id.hex() for resource_id in resource_ids)}")
-        return deleted_models
-
-    def _delete_resource_helper(self, _resource_node: ResourceNode):
-        deleted_models = []
-        for child in _resource_node._children.keys():
-            deleted_models.extend(self._delete_resource_helper(child))
-
-        for indexable_attribute, val in _resource_node.model.get_index_values().items():
-            self._remove_resource_attribute_from_index(indexable_attribute, _resource_node)
-
-        tag_removal_blacklist: Set[ResourceTag] = set()
-        for tag in _resource_node.model.tags:
-            self._remove_resource_tag_from_index(tag, _resource_node, tag_removal_blacklist)
-            tag_removal_blacklist.update(tag.tag_classes())
-
-        del self._resource_store[_resource_node.model.id]
-        if _resource_node.model.data_id is not None:
-            del self._resource_by_data_id_store[_resource_node.model.data_id]
-
-        deleted_models.append(_resource_node.model)
-        return deleted_models
+    async def delete_resources(self, resource_ids: Iterable[bytes]) -> Iterable[ResourceModel]:
+        pass
