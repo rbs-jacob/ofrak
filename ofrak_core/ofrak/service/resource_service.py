@@ -678,11 +678,13 @@ def _type_from_str(t: str) -> type:
 
 
 def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceModel:
-    data_id, parent_id = next(
-        conn.execute(
-            "SELECT data_id, parent_id FROM resources WHERE resources.id = ?", (resource_id,)
-        )
-    )
+    ids = conn.execute(
+        "SELECT data_id, parent_id FROM resources WHERE resources.resource_id = ?",
+        (resource_id,),
+    ).fetchone()
+    if ids is None:
+        raise RuntimeError(f"Resource ID {resource_id.hex()} does not exist!")
+    data_id, parent_id = ids
     tags = set()
     for (tag_name,) in conn.execute(
         "SELECT tag FROM tags WHERE tags.resource_id = ?", (resource_id,)
@@ -694,7 +696,7 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
         (resource_id,),
     ):
         attributes[_type_from_str(attributes_type)] = attribute
-    data_dependencies = defaultdict(default_factory=set)
+    data_dependencies = defaultdict(set)
     for (
         dependent_resource_id,
         component_id,
@@ -702,7 +704,7 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
         range_start,
         range_end,
     ) in conn.execute(
-        "SELECT dependent_resource_id, component_id, attributes_type, range_start, range_end FROM data_depedencies WHERE data_dependencies.resource_id = ?",
+        "SELECT dependent_resource_id, component_id, attributes_type, range_start, range_end FROM data_dependencies WHERE data_dependencies.resource_id = ?",
         (resource_id,),
     ):
         r = Range(range_start, range_end)
@@ -711,7 +713,7 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
             dependent_resource_id, component_id, _type_from_str(attributes_type)
         )
         data_dependencies[attr_dep].add(r)
-    attribute_dependencies = defaultdict(default_factory=set)
+    attribute_dependencies = defaultdict(set)
     for (attributes_type, dependent_resource_id, component_id) in conn.execute(
         "SELECT attributes_type, dependent_resource_id, component_id FROM attribute_dependencies WHERE attribute_dependencies.resource_id = ?",
         (resource_id,),
@@ -724,7 +726,7 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
         attribute_dependencies[deserialized_type] = attr_dep
     component_versions = dict(
         conn.execute(
-            "SELECT component_id, component_version FROM component_versions WHERE component_verisons.resource_id = ?",
+            "SELECT component_id, component_version FROM component_versions WHERE component_versions.resource_id = ?",
             (resource_id,),
         )
     )
@@ -741,8 +743,8 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
         parent_id=parent_id,
         tags=tags,
         attributes=attributes,
-        data_dependencies=data_dependencies,
-        attribute_dependencies=attribute_dependencies,
+        data_dependencies=dict(data_dependencies),
+        attribute_dependencies=dict(attribute_dependencies),
         component_versions=component_versions,
         components_by_attributes=components_by_attributes,
     )
@@ -864,14 +866,15 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
         "INSERT INTO components_by_attributes VALUES(?, ?, ?, ?)",
         [
             (resource_id, _type_to_str(attributes_type), component_id, component_version)
-            for attributes_type, (
+            for (
+                attributes_type,
                 component_id,
                 component_version,
             ) in diff.attributes_component_added
         ],
     )
     conn.executemany(
-        "DELETE FROM components_by_attributes WHERE compoonents_by_attributes.resource_id = ? AND components_by_attributes.attribute_type",
+        "DELETE FROM components_by_attributes WHERE components_by_attributes.resource_id = ? AND components_by_attributes.attributes_type",
         [
             (resource_id, _type_to_str(attributes_type))
             for attributes_type in diff.attributes_component_removed
@@ -881,14 +884,14 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
 
 
 class ResourceService(ResourceServiceInterface):
-    def __int__(self):
-        self._conn = sqlite3.connect(":memory:")
+    def __init__(self):
+        self._conn = sqlite3.connect(
+            ":memory:",  # detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+        )
         with self._conn as conn:
-            conn.execute("CREATE TABLE resources (id PRIMARY KEY, data_id, parent_id)")
+            conn.execute("CREATE TABLE resources (resource_id, data_id, parent_id)")
             conn.execute("CREATE TABLE tags (resource_id, tag)")
-            conn.execute(
-                "CREATE TABLE attributes (id INTEGER PRIMARY KEY, resource_id, attributes_type, attribute)"
-            )
+            conn.execute("CREATE TABLE attributes (resource_id, attributes_type, attribute)")
             conn.execute(
                 "CREATE TABLE data_dependencies (resource_id, dependent_resource_id, component_id, attributes_type, range_start, range_end)"
             )
@@ -1028,6 +1031,8 @@ class ResourceService(ResourceServiceInterface):
                     "SELECT parent_id FROM resources WHERE resources.resource_id = ?",
                     (resource_id,),
                 ).fetchone()
+                if parent_id is None:
+                    break
                 ancestors.append(_get_model_by_id(parent_id, conn))
                 resource_id = parent_id
         return ancestors
