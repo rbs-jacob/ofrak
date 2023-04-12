@@ -761,6 +761,7 @@ def _delete_resources(
         ]
         result.update(_delete_resources(children_ids, conn))
         result.add(_get_model_by_id(resource_id, conn))
+        # TODO: Delete tags, attributes, and stuff from other tables
         conn.execute("DELETE FROM resources WHERE resources.resource_id = ?", (resource_id,))
     return result
 
@@ -777,6 +778,106 @@ def _get_descendants(
         descendants.extend(_get_descendants(descendant_id, conn))
     descendants.append(_get_model_by_id(resource_id, conn))
     return descendants
+
+
+def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
+    resource_id = diff.id
+    conn.executemany(
+        "INSERT INTO tags VALUES(?, ?)",
+        [(resource_id, _type_to_str(tag)) for tag in diff.tags_added],
+    )
+    conn.executemany(
+        "DELETE FROM tags WHERE tags.resource_id = ? AND tags.tag = ?",
+        [(resource_id, _type_to_str(tag)) for tag in diff.tags_removed],
+    )
+    conn.executemany(
+        "INSERT INTO attributes VALUES(?, ?, ?)",
+        [
+            (resource_id, _type_to_str(type(attribute)), None)  # TODO: Serialize attribute
+            for attribute in diff.attributes_added
+        ],
+    )
+    conn.executemany(
+        "DELETE FROM attributes WHERE attributes.resource_id = ? AND attributes.attributes_type = ?",
+        [
+            (resource_id, _type_to_str(attributes_type))
+            for attributes_type in diff.attributes_removed
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO data_dependencies VALUES(?, ?, ?, ?, ?, ?)",
+        [
+            (
+                resource_id,
+                dep.dependent_resource_id,
+                dep.component_id,
+                _type_to_str(dep.attributes),
+                data_range.start,
+                data_range.end,
+            )
+            for dep, data_range in diff.data_dependencies_added
+        ],
+    )
+    conn.executemany(
+        "DELETE FROM data_dependencies WHERE data_dependencies.resource_id = ? AND data_dependencies.dependent_resource_id = ? AND data_dependencies.component_id = ? AND data_dependencies.attributes_type = ?",
+        [
+            (resource_id, dep.dependent_resource_id, dep.component_id, _type_to_str(dep.attributes))
+            for dep in diff.data_dependencies_removed
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO attribute_dependencies VALUES(?, ?, ?, ?)",
+        [
+            (
+                resource_id,
+                _type_to_str(attributes_type),
+                dep.dependent_resource_id,
+                dep.component_id,
+            )
+            for attributes_type, dep in diff.attribute_dependencies_added
+        ],
+    )
+    conn.executemany(
+        "DELETE FROM attribute_dependencies WHERE attribute_dependencies.resource_id = ? AND attribute_dependencies.attributes_type = ? AND attribute_dependencies.dependent_resource_id = ? AND attribute_dependencies.component_id = ?",
+        [
+            (
+                resource_id,
+                _type_to_str(attributes_type),
+                dep.dependent_resource_id,
+                dep.component_id,
+            )
+            for attributes_type, dep in diff.attribute_dependencies_removed
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO component_versions VALUES(?, ?, ?)",
+        [
+            (resource_id, component_id, component_version)
+            for component_id, component_version in diff.component_versions_added
+        ],
+    )
+    conn.executemany(
+        "DELETE FROM component_versions WHERE component_versions.resource_id = ? AND component_versions.component_id = ?",
+        [(resource_id, component_id) for component_id in diff.component_versions_removed],
+    )
+    conn.executemany(
+        "INSERT INTO components_by_attributes VALUES(?, ?, ?, ?)",
+        [
+            (resource_id, _type_to_str(attributes_type), component_id, component_version)
+            for attributes_type, (
+                component_id,
+                component_version,
+            ) in diff.attributes_component_added
+        ],
+    )
+    conn.executemany(
+        "DELETE FROM components_by_attributes WHERE compoonents_by_attributes.resource_id = ? AND components_by_attributes.attribute_type",
+        [
+            (resource_id, _type_to_str(attributes_type))
+            for attributes_type in diff.attributes_component_removed
+        ],
+    )
+    return _get_model_by_id(resource_id, conn)
 
 
 class ResourceService(ResourceServiceInterface):
@@ -825,7 +926,7 @@ class ResourceService(ResourceServiceInterface):
                         resource.id,
                         dep.dependent_resource_id,
                         dep.component_id,
-                        dep.attributes,
+                        _type_to_str(dep.attributes),
                         data_range.start,
                         data_range.end,
                     )
@@ -965,12 +1066,14 @@ class ResourceService(ResourceServiceInterface):
             ]
 
     async def update(self, resource_diff: ResourceModelDiff) -> ResourceModel:
-        pass
+        with self._conn as conn:
+            return _update(resource_diff, conn)
 
     async def update_many(
         self, resource_diffs: Iterable[ResourceModelDiff]
     ) -> Iterable[ResourceModel]:
-        pass
+        with self._conn as conn:
+            return [_update(resource_diff, conn) for resource_diff in resource_diffs]
 
     async def rebase_resource(self, resource_id: bytes, new_parent_id: bytes):
         with self._conn as conn:
