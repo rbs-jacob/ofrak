@@ -29,6 +29,7 @@ from ofrak.service.resource_service_i import (
     ResourceFilterCondition,
     ResourceServiceWalkError,
 )
+from ofrak_type import AlreadyExistError, NotFoundError
 from ofrak_type.range import Range
 
 LOGGER = logging.getLogger(__name__)
@@ -683,7 +684,7 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
         (resource_id,),
     ).fetchone()
     if ids is None:
-        raise RuntimeError(f"Resource ID {resource_id.hex()} does not exist!")
+        raise NotFoundError(f"Resource ID {resource_id.hex()} does not exist")
     data_id, parent_id = ids
     tags = set()
     for (tag_name,) in conn.execute(
@@ -771,14 +772,16 @@ def _delete_resources(
 def _get_descendants(
     resource_id: bytes,
     conn: sqlite3.Connection,
+    include_self=False,
 ) -> Iterable[ResourceModel]:
     # TODO: Use WITH RECURSIVE in query?
     descendants = []
     for (descendant_id,) in conn.execute(
         "SELECT resource_id FROM resources WHERE resources.parent_id = ?", (resource_id,)
     ):
-        descendants.extend(_get_descendants(descendant_id, conn))
-    descendants.append(_get_model_by_id(resource_id, conn))
+        descendants.extend(_get_descendants(descendant_id, conn, include_self=True))
+    if include_self:
+        descendants.append(_get_model_by_id(resource_id, conn))
     return descendants
 
 
@@ -795,7 +798,7 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
     conn.executemany(
         "INSERT INTO attributes VALUES(?, ?, ?)",
         [
-            (resource_id, _type_to_str(type(attribute)), None)  # TODO: Serialize attribute
+            (resource_id, _type_to_str(attribute), None)  # TODO: Serialize attribute
             for attribute in diff.attributes_added
         ],
     )
@@ -907,6 +910,10 @@ class ResourceService(ResourceServiceInterface):
 
     async def create(self, resource: ResourceModel) -> ResourceModel:
         with self._conn as conn:
+            if conn.execute(
+                "SELECT * FROM resources WHERE resource_id = ?", (resource.id,)
+            ).fetchone():
+                raise AlreadyExistError(f"Resource {resource.id.hex()} already exists")
             conn.execute(
                 "INSERT INTO resources VALUES(?, ?, ?)",
                 (resource.id, resource.data_id, resource.parent_id),
@@ -918,7 +925,7 @@ class ResourceService(ResourceServiceInterface):
             conn.executemany(
                 "INSERT INTO attributes VALUES(?, ?, ?)",
                 [
-                    (resource.id, _type_to_str(type(attribute)), None)  # TODO: Serialize attribute
+                    (resource.id, _type_to_str(attribute), None)  # TODO: Serialize attribute
                     for attribute in resource.attributes
                 ],
             )
@@ -993,14 +1000,17 @@ class ResourceService(ResourceServiceInterface):
             ]
 
     async def get_by_data_ids(self, data_ids: Iterable[bytes]) -> Iterable[ResourceModel]:
-        with self._conn as conn:
-            resource_ids = [
-                conn.execute(
-                    "SELECT resource_id FROM resources WHERE resources.data_id = ?",
-                    (data_id,),
-                ).fetchone()[0]
-                for data_id in data_ids
-            ]
+        try:
+            with self._conn as conn:
+                resource_ids = [
+                    conn.execute(
+                        "SELECT resource_id FROM resources WHERE resources.data_id = ?",
+                        (data_id,),
+                    ).fetchone()[0]
+                    for data_id in data_ids
+                ]
+        except TypeError:
+            raise NotFoundError()
         return await self.get_by_ids(resource_ids)
 
     async def get_by_ids(self, resource_ids: Iterable[bytes]) -> Iterable[ResourceModel]:
