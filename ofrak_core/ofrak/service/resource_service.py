@@ -697,18 +697,19 @@ def _serialize_attribute_field(attr):
 
 # TODO: Type hint
 def _deserialize_attribute_field(attributes_type, name, data):
-    data_type = next(
-        field.type for field in dataclasses.fields(attributes_type) if field.name == name
-    )
     if any(
         [
-            data_type == str,
-            data_type == int,
-            data_type == float,
-            data_type == bytes,
+            isinstance(data, str),
+            isinstance(data, int),
+            isinstance(data, float),
             data is None,
         ]
     ):
+        return data
+    data_type = next(
+        field.type for field in dataclasses.fields(attributes_type) if field.name == name
+    )
+    if data_type == bytes:
         return data
     return pickle.loads(data)
 
@@ -813,14 +814,39 @@ def _delete_resources(
 def _get_descendants(
     resource_id: bytes,
     conn: sqlite3.Connection,
+    max_count: int = -1,
+    max_depth: int = -1,
+    r_filter: Optional[ResourceFilter] = None,
+    r_sort: Optional[ResourceSort] = None,
     include_self=False,
 ) -> Iterable[ResourceModel]:
+    filter_query_parameters, filter_query_list = [], []
+    if r_filter:
+        include_self = r_filter.include_self
+        r_filter.include_self = True
+        # TODO
+        # attribute_filters: Optional[Iterable[ResourceAttributeFilter]] = None
+        if r_filter.tags:
+            tag_list = list(r_filter.tags)
+            condition = "resources.resource_id IN (SELECT resource_id FROM tags WHERE "
+            condition_join = (
+                " AND " if r_filter.tags_condition == ResourceFilterCondition.AND else " OR "
+            )
+            condition += condition_join.join([f"tags.tag = ?"] * len(tag_list))
+            condition += ")"
+            filter_query_list.append(condition)
+            filter_query_parameters.extend(map(_type_to_str, tag_list))
     # TODO: Use WITH RECURSIVE in query?
     descendants = []
     for (descendant_id,) in conn.execute(
-        "SELECT resource_id FROM resources WHERE resources.parent_id = ?", (resource_id,)
+        f"SELECT resource_id FROM resources WHERE resources.parent_id = ?{(' AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}",
+        (resource_id, *filter_query_parameters),
     ):
-        descendants.extend(_get_descendants(descendant_id, conn, include_self=True))
+        descendants.extend(
+            _get_descendants(
+                descendant_id, conn, max_count, max_depth, r_filter, r_sort, include_self=True
+            )
+        )
     if include_self:
         descendants.append(_get_model_by_id(resource_id, conn))
     return descendants
@@ -1080,17 +1106,32 @@ class ResourceService(ResourceServiceInterface):
     async def get_ancestors_by_id(
         self, resource_id: bytes, max_count: int = -1, r_filter: Optional[ResourceFilter] = None
     ) -> Iterable[ResourceModel]:
+        filter_query_list, filter_query_parameters = [], []
         if r_filter:
             # TODO
-            raise NotImplementedError()
+            # include_self: bool = False
+            # attribute_filters: Optional[Iterable[ResourceAttributeFilter]] = None
+            if r_filter.tags:
+                tag_list = list(r_filter.tags)
+                condition = "resources.parent_id IN (SELECT resource_id FROM tags WHERE "
+                condition_join = (
+                    " AND " if r_filter.tags_condition == ResourceFilterCondition.AND else " OR "
+                )
+                condition += condition_join.join([f"tags.tag = ?"] * len(tag_list))
+                condition += ")"
+                filter_query_list.append(condition)
+                filter_query_parameters.extend(map(_type_to_str, tag_list))
         # TODO: Use WITH RECURSIVE in query?
         ancestors = []
         with self._conn as conn:
             while resource_id and max_count == -1 or len(ancestors) < max_count:
-                (parent_id,) = conn.execute(
-                    "SELECT parent_id FROM resources WHERE resources.resource_id = ?",
-                    (resource_id,),
+                id_tuple = conn.execute(
+                    f"SELECT parent_id FROM resources WHERE resources.resource_id = ?{(' AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}",
+                    (resource_id, *filter_query_parameters),
                 ).fetchone()
+                if id_tuple is None:
+                    break
+                (parent_id,) = id_tuple
                 if parent_id is None:
                     break
                 ancestors.append(_get_model_by_id(parent_id, conn))
@@ -1106,7 +1147,7 @@ class ResourceService(ResourceServiceInterface):
         r_sort: Optional[ResourceSort] = None,
     ) -> Iterable[ResourceModel]:
         with self._conn as conn:
-            return _get_descendants(resource_id, conn)
+            return _get_descendants(resource_id, conn, max_count, max_depth, r_filter, r_sort)
 
     async def get_siblings_by_id(
         self,
@@ -1115,9 +1156,24 @@ class ResourceService(ResourceServiceInterface):
         r_filter: Optional[ResourceFilter] = None,
         r_sort: Optional[ResourceSort] = None,
     ) -> Iterable[ResourceModel]:
-        if max_count != -1 or r_filter or r_sort:
+        if max_count != -1 or r_sort:
             # TODO
             raise NotImplementedError()
+        filter_query_parameters, filter_query_list = [], []
+        if r_filter:
+            # TODO
+            # include_self: bool = False
+            # attribute_filters: Optional[Iterable[ResourceAttributeFilter]] = None
+            if r_filter.tags:
+                tag_list = list(r_filter.tags)
+                condition = "resources.resource_id IN (SELECT resource_id FROM tags WHERE "
+                condition_join = (
+                    " AND " if r_filter.tags_condition == ResourceFilterCondition.AND else " OR "
+                )
+                condition += condition_join.join([f"tags.tag = ?"] * len(tag_list))
+                condition += ")"
+                filter_query_list.append(condition)
+                filter_query_parameters.extend(map(_type_to_str, tag_list))
         with self._conn as conn:
             (parent_id,) = conn.execute(
                 "SELECT parent_id FROM resources WHERE resources.resource_id = ?", (resource_id,)
