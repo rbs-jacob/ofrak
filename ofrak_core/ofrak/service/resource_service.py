@@ -1,6 +1,8 @@
 import bisect
+import dataclasses
 import inspect
 import logging
+import pickle
 import sqlite3
 
 import sys
@@ -678,6 +680,39 @@ def _type_from_str(t: str) -> type:
     return getattr(module, cls_name)
 
 
+# TODO: Type hint
+def _serialize_attribute_field(attr):
+    if any(
+        [
+            isinstance(attr, str),
+            isinstance(attr, int),
+            isinstance(attr, float),
+            isinstance(attr, bytes),
+            attr is None,
+        ]
+    ):
+        return attr
+    return pickle.dumps(attr)
+
+
+# TODO: Type hint
+def _deserialize_attribute_field(attributes_type, name, data):
+    data_type = next(
+        field.type for field in dataclasses.fields(attributes_type) if field.name == name
+    )
+    if any(
+        [
+            data_type == str,
+            data_type == int,
+            data_type == float,
+            data_type == bytes,
+            data is None,
+        ]
+    ):
+        return data
+    return pickle.loads(data)
+
+
 def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceModel:
     ids = conn.execute(
         "SELECT data_id, parent_id FROM resources WHERE resources.resource_id = ?",
@@ -691,12 +726,18 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
         "SELECT tag FROM tags WHERE tags.resource_id = ?", (resource_id,)
     ):
         tags.add(_type_from_str(tag_name))
-    attributes = dict()
-    for (attributes_type, attribute) in conn.execute(
-        "SELECT attributes_type, attribute FROM attributes WHERE attributes.resource_id = ?",
+    _attributes = defaultdict(dict)
+    for (attributes_type, field_name, field_value) in conn.execute(
+        "SELECT attributes_type, field_name, field_value FROM attributes WHERE attributes.resource_id = ?",
         (resource_id,),
     ):
-        attributes[_type_from_str(attributes_type)] = attribute
+        _attributes[_type_from_str(attributes_type)][field_name] = _deserialize_attribute_field(
+            _type_from_str(attributes_type), field_name, field_value
+        )
+    attributes = {
+        attributes_type: attributes_type(**fields)
+        for attributes_type, fields in _attributes.items()
+    }
     data_dependencies = defaultdict(set)
     for (
         dependent_resource_id,
@@ -796,10 +837,11 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
         [(resource_id, _type_to_str(tag)) for tag in diff.tags_removed],
     )
     conn.executemany(
-        "INSERT INTO attributes VALUES(?, ?, ?)",
+        "INSERT INTO attributes VALUES(?, ?, ?, ?)",
         [
-            (resource_id, _type_to_str(attribute), None)  # TODO: Serialize attribute
-            for attribute in diff.attributes_added
+            (resource_id, _type_to_str(attributes_type), name, _serialize_attribute_field(value))
+            for attributes_type, attribute in diff.attributes_added.items()
+            for name, value in dataclasses.asdict(attribute).items()
         ],
     )
     conn.executemany(
@@ -894,7 +936,9 @@ class ResourceService(ResourceServiceInterface):
         with self._conn as conn:
             conn.execute("CREATE TABLE resources (resource_id, data_id, parent_id)")
             conn.execute("CREATE TABLE tags (resource_id, tag)")
-            conn.execute("CREATE TABLE attributes (resource_id, attributes_type, attribute)")
+            conn.execute(
+                "CREATE TABLE attributes (resource_id, attributes_type, field_name, field_value)"
+            )
             conn.execute(
                 "CREATE TABLE data_dependencies (resource_id, dependent_resource_id, component_id, attributes_type, range_start, range_end)"
             )
@@ -923,10 +967,16 @@ class ResourceService(ResourceServiceInterface):
                 [(resource.id, _type_to_str(tag)) for tag in resource.tags],
             )
             conn.executemany(
-                "INSERT INTO attributes VALUES(?, ?, ?)",
+                "INSERT INTO attributes VALUES(?, ?, ?, ?)",
                 [
-                    (resource.id, _type_to_str(attribute), None)  # TODO: Serialize attribute
-                    for attribute in resource.attributes
+                    (
+                        resource.id,
+                        _type_to_str(attributes_type),
+                        name,
+                        _serialize_attribute_field(value),
+                    )
+                    for attributes_type, attribute in resource.attributes.items()
+                    for name, value in dataclasses.asdict(attribute).items()
                 ],
             )
             conn.executemany(
