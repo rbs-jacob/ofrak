@@ -960,6 +960,11 @@ class ResourceService(ResourceServiceInterface):
             ":memory:",  # detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
         )
         with self._conn as conn:
+            conn.execute("pragma journal_mode = WAL")
+            conn.execute("pragma synchronous = normal")
+            conn.execute("pragma temp_store = memory")
+            conn.execute("pragma mmap_size = 30000000000")
+
             conn.execute("CREATE TABLE resources (resource_id, data_id, parent_id)")
             conn.execute("CREATE TABLE tags (resource_id, tag)")
             conn.execute(
@@ -1103,6 +1108,7 @@ class ResourceService(ResourceServiceInterface):
             len(list(await self.get_ancestors_by_id(resource_id))) for resource_id in resource_ids
         ]
 
+    # @lru_cache
     async def get_ancestors_by_id(
         self, resource_id: bytes, max_count: int = -1, r_filter: Optional[ResourceFilter] = None
     ) -> Iterable[ResourceModel]:
@@ -1124,7 +1130,7 @@ class ResourceService(ResourceServiceInterface):
         # TODO: Use WITH RECURSIVE in query?
         ancestors = []
         with self._conn as conn:
-            while resource_id and max_count == -1 or len(ancestors) < max_count:
+            while resource_id and (max_count == -1 or len(ancestors) < max_count):
                 id_tuple = conn.execute(
                     f"SELECT parent_id FROM resources WHERE resources.resource_id = ?{(' AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}",
                     (resource_id, *filter_query_parameters),
