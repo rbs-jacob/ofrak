@@ -819,6 +819,7 @@ def _get_descendants(
     r_filter: Optional[ResourceFilter] = None,
     r_sort: Optional[ResourceSort] = None,
     include_self=False,
+    depth=0,
 ) -> Iterable[ResourceModel]:
     filter_query_parameters, filter_query_list = [], []
     if r_filter:
@@ -838,17 +839,26 @@ def _get_descendants(
             filter_query_parameters.extend(map(_type_to_str, tag_list))
     # TODO: Use WITH RECURSIVE in query?
     descendants = []
+    if include_self:
+        descendants.append(_get_model_by_id(resource_id, conn))
+    if max_depth == -1 or depth > max_depth:
+        return descendants
     for (descendant_id,) in conn.execute(
         f"SELECT resource_id FROM resources WHERE resources.parent_id = ?{(' AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}",
         (resource_id, *filter_query_parameters),
     ):
         descendants.extend(
             _get_descendants(
-                descendant_id, conn, max_count, max_depth, r_filter, r_sort, include_self=True
+                descendant_id,
+                conn,
+                max_count,
+                max_depth,
+                r_filter,
+                r_sort,
+                include_self=True,
+                depth=(depth + 1),
             )
         )
-    if include_self:
-        descendants.append(_get_model_by_id(resource_id, conn))
     return descendants
 
 
@@ -965,22 +975,24 @@ class ResourceService(ResourceServiceInterface):
             conn.execute("pragma temp_store = memory")
             conn.execute("pragma mmap_size = 30000000000")
 
-            conn.execute("CREATE TABLE resources (resource_id, data_id, parent_id)")
-            conn.execute("CREATE TABLE tags (resource_id, tag)")
+            conn.execute("CREATE TABLE resources (resource_id PRIMARY KEY, data_id, parent_id)")
             conn.execute(
-                "CREATE TABLE attributes (resource_id, attributes_type, field_name, field_value)"
+                "CREATE TABLE tags (resource_id, tag, FOREIGN KEY (resource_id) REFERENCES resources (resource_id))"
             )
             conn.execute(
-                "CREATE TABLE data_dependencies (resource_id, dependent_resource_id, component_id, attributes_type, range_start, range_end)"
+                "CREATE TABLE attributes (resource_id, attributes_type, field_name, field_value, FOREIGN KEY (resource_id) REFERENCES resources (resource_id))"
             )
             conn.execute(
-                "CREATE TABLE attribute_dependencies (resource_id, attributes_type, dependent_resource_id, component_id)"
+                "CREATE TABLE data_dependencies (resource_id, dependent_resource_id, component_id, attributes_type, range_start, range_end, FOREIGN KEY (resource_id) REFERENCES resources (resource_id))"
             )
             conn.execute(
-                "CREATE TABLE component_versions (resource_id, component_id, component_version)"
+                "CREATE TABLE attribute_dependencies (resource_id, attributes_type, dependent_resource_id, component_id, FOREIGN KEY (resource_id) REFERENCES resources (resource_id))"
             )
             conn.execute(
-                "CREATE TABLE components_by_attributes (resource_id, attributes_type, component_id, version)"
+                "CREATE TABLE component_versions (resource_id, component_id, component_version, FOREIGN KEY (resource_id) REFERENCES resources (resource_id))"
+            )
+            conn.execute(
+                "CREATE TABLE components_by_attributes (resource_id, attributes_type, component_id, version, FOREIGN KEY (resource_id) REFERENCES resources (resource_id))"
             )
 
     async def create(self, resource: ResourceModel) -> ResourceModel:
