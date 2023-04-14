@@ -716,7 +716,9 @@ def _deserialize_attribute_field(attributes_type, name, data):
 
 def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceModel:
     ids = conn.execute(
-        "SELECT data_id, parent_id FROM resources WHERE resources.resource_id = ?",
+        """SELECT data_id, parent_id 
+        FROM resources 
+        WHERE resources.resource_id = ?""",
         (resource_id,),
     ).fetchone()
     if ids is None:
@@ -724,12 +726,17 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
     data_id, parent_id = ids
     tags = set()
     for (tag_name,) in conn.execute(
-        "SELECT tag FROM tags WHERE tags.resource_id = ?", (resource_id,)
+        """SELECT tag 
+        FROM tags 
+        WHERE tags.resource_id = ?""",
+        (resource_id,),
     ):
         tags.add(_type_from_str(tag_name))
     _attributes = defaultdict(dict)
     for (attributes_type, field_name, field_value) in conn.execute(
-        "SELECT attributes_type, field_name, field_value FROM attributes WHERE attributes.resource_id = ?",
+        """SELECT attributes_type, field_name, field_value 
+        FROM attributes 
+        WHERE attributes.resource_id = ?""",
         (resource_id,),
     ):
         _attributes[_type_from_str(attributes_type)][field_name] = _deserialize_attribute_field(
@@ -747,7 +754,9 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
         range_start,
         range_end,
     ) in conn.execute(
-        "SELECT dependent_resource_id, component_id, attributes_type, range_start, range_end FROM data_dependencies WHERE data_dependencies.resource_id = ?",
+        """SELECT dependent_resource_id, component_id, attributes_type, range_start, range_end 
+        FROM data_dependencies 
+        WHERE data_dependencies.resource_id = ?""",
         (resource_id,),
     ):
         r = Range(range_start, range_end)
@@ -758,7 +767,9 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
         data_dependencies[attr_dep].add(r)
     attribute_dependencies = defaultdict(set)
     for (attributes_type, dependent_resource_id, component_id) in conn.execute(
-        "SELECT attributes_type, dependent_resource_id, component_id FROM attribute_dependencies WHERE attribute_dependencies.resource_id = ?",
+        """SELECT attributes_type, dependent_resource_id, component_id 
+        FROM attribute_dependencies 
+        WHERE attribute_dependencies.resource_id = ?""",
         (resource_id,),
     ):
         # TODO: Fix typing
@@ -769,14 +780,18 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
         attribute_dependencies[deserialized_type] = attr_dep
     component_versions = dict(
         conn.execute(
-            "SELECT component_id, component_version FROM component_versions WHERE component_versions.resource_id = ?",
+            """SELECT component_id, component_version 
+            FROM component_versions 
+            WHERE component_versions.resource_id = ?""",
             (resource_id,),
         )
     )
     components_by_attributes = {
         _type_from_str(attributes_type): (component_id, component_version)
         for attributes_type, component_id, component_version in conn.execute(
-            "SELECT attributes_type, component_id, version FROM components_by_attributes WHERE components_by_attributes.resource_id = ?",
+            """SELECT attributes_type, component_id, version 
+            FROM components_by_attributes 
+            WHERE components_by_attributes.resource_id = ?""",
             (resource_id,),
         )
     }
@@ -801,13 +816,20 @@ def _delete_resources(
         children_ids = [
             child_id
             for (child_id,) in conn.execute(
-                "SELECT resource_id FROM resources WHERE resources.parent_id = ?", (resource_id,)
+                """SELECT resource_id 
+                FROM resources 
+                WHERE resources.parent_id = ?""",
+                (resource_id,),
             )
         ]
         result.update(_delete_resources(children_ids, conn))
         result.add(_get_model_by_id(resource_id, conn))
         # TODO: Delete tags, attributes, and stuff from other tables
-        conn.execute("DELETE FROM resources WHERE resources.resource_id = ?", (resource_id,))
+        conn.execute(
+            """DELETE FROM resources 
+        WHERE resources.resource_id = ?""",
+            (resource_id,),
+        )
     return result
 
 
@@ -844,7 +866,10 @@ def _get_descendants(
     if max_depth == -1 or depth > max_depth:
         return descendants
     for (descendant_id,) in conn.execute(
-        f"SELECT resource_id FROM resources WHERE resources.parent_id = ?{(' AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}",
+        f"""SELECT resource_id 
+        FROM resources 
+        WHERE resources.parent_id = ? 
+        {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}""",
         (resource_id, *filter_query_parameters),
     ):
         descendants.extend(
@@ -869,7 +894,9 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
         [(resource_id, _type_to_str(tag)) for tag in diff.tags_added],
     )
     conn.executemany(
-        "DELETE FROM tags WHERE tags.resource_id = ? AND tags.tag = ?",
+        """DELETE FROM tags 
+        WHERE tags.resource_id = ? 
+        AND tags.tag = ?""",
         [(resource_id, _type_to_str(tag)) for tag in diff.tags_removed],
     )
     conn.executemany(
@@ -881,7 +908,9 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
         ],
     )
     conn.executemany(
-        "DELETE FROM attributes WHERE attributes.resource_id = ? AND attributes.attributes_type = ?",
+        """DELETE FROM attributes 
+        WHERE attributes.resource_id = ? 
+        AND attributes.attributes_type = ?""",
         [
             (resource_id, _type_to_str(attributes_type))
             for attributes_type in diff.attributes_removed
@@ -902,7 +931,11 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
         ],
     )
     conn.executemany(
-        "DELETE FROM data_dependencies WHERE data_dependencies.resource_id = ? AND data_dependencies.dependent_resource_id = ? AND data_dependencies.component_id = ? AND data_dependencies.attributes_type = ?",
+        """DELETE FROM data_dependencies 
+        WHERE data_dependencies.resource_id = ? 
+        AND data_dependencies.dependent_resource_id = ? 
+        AND data_dependencies.component_id = ? 
+        AND data_dependencies.attributes_type = ?""",
         [
             (resource_id, dep.dependent_resource_id, dep.component_id, _type_to_str(dep.attributes))
             for dep in diff.data_dependencies_removed
@@ -921,7 +954,11 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
         ],
     )
     conn.executemany(
-        "DELETE FROM attribute_dependencies WHERE attribute_dependencies.resource_id = ? AND attribute_dependencies.attributes_type = ? AND attribute_dependencies.dependent_resource_id = ? AND attribute_dependencies.component_id = ?",
+        """DELETE FROM attribute_dependencies 
+        WHERE attribute_dependencies.resource_id = ? 
+        AND attribute_dependencies.attributes_type = ? 
+        AND attribute_dependencies.dependent_resource_id = ? 
+        AND attribute_dependencies.component_id = ?""",
         [
             (
                 resource_id,
@@ -940,7 +977,9 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
         ],
     )
     conn.executemany(
-        "DELETE FROM component_versions WHERE component_versions.resource_id = ? AND component_versions.component_id = ?",
+        """DELETE FROM component_versions 
+        WHERE component_versions.resource_id = ? 
+        AND component_versions.component_id = ?""",
         [(resource_id, component_id) for component_id in diff.component_versions_removed],
     )
     conn.executemany(
@@ -955,7 +994,9 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
         ],
     )
     conn.executemany(
-        "DELETE FROM components_by_attributes WHERE components_by_attributes.resource_id = ? AND components_by_attributes.attributes_type",
+        """DELETE FROM components_by_attributes 
+        WHERE components_by_attributes.resource_id = ? 
+        AND components_by_attributes.attributes_type""",
         [
             (resource_id, _type_to_str(attributes_type))
             for attributes_type in diff.attributes_component_removed
@@ -975,24 +1016,65 @@ class ResourceService(ResourceServiceInterface):
             conn.execute("pragma temp_store = memory")
             conn.execute("pragma mmap_size = 30000000000")
 
-            conn.execute("CREATE TABLE resources (resource_id PRIMARY KEY, data_id, parent_id)")
             conn.execute(
-                "CREATE TABLE tags (resource_id, tag, FOREIGN KEY (resource_id) REFERENCES resources (resource_id))"
+                """CREATE TABLE resources (
+                    resource_id PRIMARY KEY, 
+                    data_id, 
+                    parent_id
+                )"""
             )
             conn.execute(
-                "CREATE TABLE attributes (resource_id, attributes_type, field_name, field_value, FOREIGN KEY (resource_id) REFERENCES resources (resource_id))"
+                """CREATE TABLE tags (
+                    resource_id, 
+                    tag, 
+                    FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
+                )"""
             )
             conn.execute(
-                "CREATE TABLE data_dependencies (resource_id, dependent_resource_id, component_id, attributes_type, range_start, range_end, FOREIGN KEY (resource_id) REFERENCES resources (resource_id))"
+                """CREATE TABLE attributes (
+                    resource_id, 
+                    attributes_type, 
+                    field_name, 
+                    field_value, 
+                    FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
+                )"""
             )
             conn.execute(
-                "CREATE TABLE attribute_dependencies (resource_id, attributes_type, dependent_resource_id, component_id, FOREIGN KEY (resource_id) REFERENCES resources (resource_id))"
+                """CREATE TABLE data_dependencies (
+                    resource_id, 
+                    dependent_resource_id, 
+                    component_id, 
+                    attributes_type, 
+                    range_start, 
+                    range_end, 
+                    FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
+                )"""
             )
             conn.execute(
-                "CREATE TABLE component_versions (resource_id, component_id, component_version, FOREIGN KEY (resource_id) REFERENCES resources (resource_id))"
+                """CREATE TABLE attribute_dependencies (
+                    resource_id, 
+                    attributes_type, 
+                    dependent_resource_id, 
+                    component_id, 
+                    FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
+                )"""
             )
             conn.execute(
-                "CREATE TABLE components_by_attributes (resource_id, attributes_type, component_id, version, FOREIGN KEY (resource_id) REFERENCES resources (resource_id))"
+                """CREATE TABLE component_versions (
+                    resource_id, 
+                    component_id, 
+                    component_version, 
+                    FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
+                )"""
+            )
+            conn.execute(
+                """CREATE TABLE components_by_attributes (
+                    resource_id, 
+                    attributes_type, 
+                    component_id, 
+                    version, 
+                    FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
+                )"""
             )
 
     async def create(self, resource: ResourceModel) -> ResourceModel:
@@ -1144,7 +1226,10 @@ class ResourceService(ResourceServiceInterface):
         with self._conn as conn:
             while resource_id and (max_count == -1 or len(ancestors) < max_count):
                 id_tuple = conn.execute(
-                    f"SELECT parent_id FROM resources WHERE resources.resource_id = ?{(' AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}",
+                    f"""SELECT parent_id 
+                    FROM resources 
+                    WHERE resources.resource_id = ? 
+                    {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}""",
                     (resource_id, *filter_query_parameters),
                 ).fetchone()
                 if id_tuple is None:
@@ -1194,12 +1279,18 @@ class ResourceService(ResourceServiceInterface):
                 filter_query_parameters.extend(map(_type_to_str, tag_list))
         with self._conn as conn:
             (parent_id,) = conn.execute(
-                "SELECT parent_id FROM resources WHERE resources.resource_id = ?", (resource_id,)
+                """SELECT parent_id 
+                FROM resources 
+                WHERE resources.resource_id = ?""",
+                (resource_id,),
             ).fetchone()
             return [
                 _get_model_by_id(sibling_id, conn)
                 for (sibling_id,) in conn.execute(
-                    "SELECT resource_id FROM resources WHERE resources.parent_id = ? AND resources.resource_id != ?",
+                    """SELECT resource_id 
+                    FROM resources 
+                    WHERE resources.parent_id = ? 
+                    AND resources.resource_id != ?""",
                     (parent_id, resource_id),
                 )
             ]
