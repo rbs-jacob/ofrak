@@ -714,7 +714,20 @@ def _deserialize_attribute_field(attributes_type, name, data):
     return pickle.loads(data)
 
 
-def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceModel:
+def _get_model_by_id(
+    resource_id: bytes, conn: sqlite3.Connection, force_fetch=False
+) -> ResourceModel:
+    if not force_fetch:
+        data_row = conn.execute(
+            """SELECT resource_model
+            FROM resources
+            WHERE resources.resource_id = ?""",
+            (resource_id,),
+        ).fetchone()
+        if data_row is None:
+            raise NotFoundError(f"Resource ID {resource_id.hex()} does not exist")
+        (resource_model_data,) = data_row
+        return pickle.loads(resource_model_data)
     ids = conn.execute(
         """SELECT data_id, parent_id 
         FROM resources 
@@ -795,7 +808,7 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
             (resource_id,),
         )
     }
-    return ResourceModel(
+    result = ResourceModel(
         id=resource_id,
         data_id=data_id,
         parent_id=parent_id,
@@ -806,6 +819,11 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
         component_versions=component_versions,
         components_by_attributes=components_by_attributes,
     )
+    conn.execute(
+        "INSERT INTO resources (resource_model) VALUES (?)",
+        (pickle.dumps(result),),
+    )
+    return result
 
 
 def _delete_resources(
@@ -823,7 +841,7 @@ def _delete_resources(
             )
         ]
         result.update(_delete_resources(children_ids, conn))
-        result.add(_get_model_by_id(resource_id, conn))
+        result.add(_get_model_by_id(resource_id, conn, force_fetch=True))
         # TODO: Delete tags, attributes, and stuff from other tables
         conn.execute(
             """DELETE FROM resources 
@@ -1002,7 +1020,7 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
             for attributes_type in diff.attributes_component_removed
         ],
     )
-    return _get_model_by_id(resource_id, conn)
+    return _get_model_by_id(resource_id, conn, force_fetch=True)
 
 
 class ResourceService(ResourceServiceInterface):
@@ -1020,7 +1038,8 @@ class ResourceService(ResourceServiceInterface):
                 """CREATE TABLE resources (
                     resource_id PRIMARY KEY, 
                     data_id, 
-                    parent_id
+                    parent_id,
+                    resource_model
                 )"""
             )
             conn.execute(
@@ -1084,8 +1103,8 @@ class ResourceService(ResourceServiceInterface):
             ).fetchone():
                 raise AlreadyExistError(f"Resource {resource.id.hex()} already exists")
             conn.execute(
-                "INSERT INTO resources VALUES(?, ?, ?)",
-                (resource.id, resource.data_id, resource.parent_id),
+                "INSERT INTO resources VALUES(?, ?, ?, ?)",
+                (resource.id, resource.data_id, resource.parent_id, pickle.dumps(resource)),
             )
             conn.executemany(
                 "INSERT INTO tags VALUES(?, ?)",
