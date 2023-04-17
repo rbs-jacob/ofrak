@@ -472,13 +472,12 @@ class AiohttpOFRAKServer:
     @exceptions_to_http(SerializedError)
     async def get_root_resource_from_child(self, request: Request) -> Response:
         resource = await self._get_resource_for_request(request)
-        parent = resource
-        try:
-            # Assume get_ancestors returns an ordered list with the parent first and the root last
-            for parent in await resource.get_ancestors():
-                pass
-        except NotFoundError:
-            pass
+        while True:
+            try:
+                parent = await resource.get_parent()
+                resource = parent
+            except NotFoundError:
+                break
 
         return json_response(self._serialize_resource(parent))
 

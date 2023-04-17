@@ -811,25 +811,21 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
 def _delete_resources(
     resource_ids: Iterable[bytes], conn: sqlite3.Connection
 ) -> Iterable[ResourceModel]:
-    result = set()
-    for resource_id in resource_ids:
-        children_ids = [
-            child_id
-            for (child_id,) in conn.execute(
-                """SELECT resource_id 
-                FROM resources 
-                WHERE resources.parent_id = ?""",
-                (resource_id,),
-            )
-        ]
-        result.update(_delete_resources(children_ids, conn))
-        result.add(_get_model_by_id(resource_id, conn))
-        # TODO: Delete tags, attributes, and stuff from other tables
-        conn.execute(
-            """DELETE FROM resources 
-        WHERE resources.resource_id = ?""",
+    result = [
+        _get_model_by_id(descendant_id, conn)
+        for resource_id in resource_ids
+        for (descendant_id,) in conn.execute(
+            """SELECT descendant_id
+            FROM closure
+            WHERE closure.ancestor_id = ?""",
             (resource_id,),
         )
+    ]
+    conn.executemany(
+        """DELETE FROM closure
+        WHERE closure.ancestor_id = ?""",
+        [(resource_id,) for resource_id in resource_ids],
+    )
     return result
 
 
@@ -840,18 +836,14 @@ def _get_descendants(
     max_depth: int = -1,
     r_filter: Optional[ResourceFilter] = None,
     r_sort: Optional[ResourceSort] = None,
-    include_self=False,
-    depth=0,
 ) -> Iterable[ResourceModel]:
     filter_query_parameters, filter_query_list = [], []
     if r_filter:
-        include_self = r_filter.include_self
-        r_filter.include_self = True
         # TODO
         # attribute_filters: Optional[Iterable[ResourceAttributeFilter]] = None
         if r_filter.tags:
             tag_list = list(r_filter.tags)
-            condition = "resources.resource_id IN (SELECT resource_id FROM tags WHERE "
+            condition = "closure.descendant_id IN (SELECT resource_id FROM tags WHERE "
             condition_join = (
                 " AND " if r_filter.tags_condition == ResourceFilterCondition.AND else " OR "
             )
@@ -859,32 +851,23 @@ def _get_descendants(
             condition += ")"
             filter_query_list.append(condition)
             filter_query_parameters.extend(map(_type_to_str, tag_list))
-    # TODO: Use WITH RECURSIVE in query?
-    descendants = []
-    if include_self:
-        descendants.append(_get_model_by_id(resource_id, conn))
-    if max_depth == -1 or depth > max_depth:
-        return descendants
-    for (descendant_id,) in conn.execute(
-        f"""SELECT resource_id 
-        FROM resources 
-        WHERE resources.parent_id = ? 
-        {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}""",
-        (resource_id, *filter_query_parameters),
-    ):
-        descendants.extend(
-            _get_descendants(
-                descendant_id,
-                conn,
-                max_count,
-                max_depth,
-                r_filter,
-                r_sort,
-                include_self=True,
-                depth=(depth + 1),
-            )
+    if max_depth != -1:
+        filter_query_list.append("depth <= ?")
+        filter_query_parameters.append(max_depth)
+    if max_count != -1:
+        filter_query_parameters.append(max_count)
+    return [
+        _get_model_by_id(descendant_id, conn)
+        for (descendant_id,) in conn.execute(
+            f"""SELECT descendant_id
+            FROM closure
+            WHERE ancestor_id = ?
+            {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}
+            ORDER BY depth DESC
+            {'LIMIT ?' if max_count != -1 else ''}""",
+            (resource_id, *filter_query_parameters),
         )
-    return descendants
+    ]
 
 
 def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
@@ -1076,6 +1059,15 @@ class ResourceService(ResourceServiceInterface):
                     FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
                 )"""
             )
+            conn.execute(
+                """CREATE TABLE closure (
+                    ancestor_id,
+                    descendant_id,
+                    depth,
+                    FOREIGN KEY (ancestor_id) REFERENCES resources (resource_id),
+                    FOREIGN KEY (descendant_id) REFERENCES resources (resource_id)
+                )"""
+            )
 
     async def create(self, resource: ResourceModel) -> ResourceModel:
         with self._conn as conn:
@@ -1149,6 +1141,19 @@ class ResourceService(ResourceServiceInterface):
                     ) in resource.components_by_attributes.items()
                 ],
             )
+            conn.executemany(
+                "INSERT INTO closure VALUES (?, ?, ?)",
+                [
+                    (ancestor_id, resource.id, depth + 1)
+                    for (ancestor_id, depth) in conn.execute(
+                        """SELECT ancestor_id, depth FROM closure WHERE closure.descendant_id = ?""",
+                        (resource.parent_id,),
+                    )
+                ]
+                + (
+                    [(resource.parent_id, resource.id, 1)] if resource.parent_id is not None else []
+                ),
+            )
         return resource
 
     async def get_root_resources(self) -> Iterable[ResourceModel]:
@@ -1211,9 +1216,10 @@ class ResourceService(ResourceServiceInterface):
             # TODO
             # include_self: bool = False
             # attribute_filters: Optional[Iterable[ResourceAttributeFilter]] = None
+            # max_count
             if r_filter.tags:
                 tag_list = list(r_filter.tags)
-                condition = "resources.parent_id IN (SELECT resource_id FROM tags WHERE "
+                condition = "ancestor_id IN (SELECT resource_id FROM tags WHERE "
                 condition_join = (
                     " AND " if r_filter.tags_condition == ResourceFilterCondition.AND else " OR "
                 )
@@ -1221,25 +1227,21 @@ class ResourceService(ResourceServiceInterface):
                 condition += ")"
                 filter_query_list.append(condition)
                 filter_query_parameters.extend(map(_type_to_str, tag_list))
-        # TODO: Use WITH RECURSIVE in query?
-        ancestors = []
         with self._conn as conn:
-            while resource_id and (max_count == -1 or len(ancestors) < max_count):
-                id_tuple = conn.execute(
-                    f"""SELECT parent_id 
-                    FROM resources 
-                    WHERE resources.resource_id = ? 
+            result = [
+                _get_model_by_id(ancestor_id, conn)
+                for (ancestor_id,) in conn.execute(
+                    f"""SELECT ancestor_id 
+                    FROM closure 
+                    WHERE descendant_id = ?
                     {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}""",
                     (resource_id, *filter_query_parameters),
-                ).fetchone()
-                if id_tuple is None:
-                    break
-                (parent_id,) = id_tuple
-                if parent_id is None:
-                    break
-                ancestors.append(_get_model_by_id(parent_id, conn))
-                resource_id = parent_id
-        return ancestors
+                )
+            ]
+            # TODO: Use as LIMIT in SQL query
+            if max_count != -1:
+                return result[:max_count]
+            return result
 
     async def get_descendants_by_id(
         self,
@@ -1287,10 +1289,11 @@ class ResourceService(ResourceServiceInterface):
             return [
                 _get_model_by_id(sibling_id, conn)
                 for (sibling_id,) in conn.execute(
-                    """SELECT resource_id 
+                    f"""SELECT resource_id 
                     FROM resources 
                     WHERE resources.parent_id = ? 
-                    AND resources.resource_id != ?""",
+                    AND resources.resource_id != ?
+                    {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}""",
                     (parent_id, resource_id),
                 )
             ]
@@ -1310,6 +1313,20 @@ class ResourceService(ResourceServiceInterface):
             conn.execute(
                 "UPDATE resources SET parent_id = ? WHERE resources.resource_id = ?",
                 (new_parent_id, resource_id),
+            )
+            conn.execute("DELETE FROM closure WHERE closure.descendant_id = ?", (resource_id,))
+            conn.executemany(
+                "INSERT INTO closure VALUES (?, ?, ?)",
+                [
+                    (ancestor_id, resource_id, depth + 1)
+                    for (ancestor_id, depth) in conn.execute(
+                        """SELECT ancestor_id, depth 
+                    FROM closure 
+                    WHERE closure.descendant_id = ?""",
+                        (new_parent_id,),
+                    )
+                ]
+                + ([(new_parent_id, resource_id, 1)] if new_parent_id is not None else []),
             )
 
     async def delete_resource(self, resource_id: bytes) -> Iterable[ResourceModel]:
