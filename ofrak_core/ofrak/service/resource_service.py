@@ -1024,70 +1024,70 @@ class ResourceService(ResourceServiceInterface):
 
             conn.execute(
                 """CREATE TABLE resources (
-                    resource_id PRIMARY KEY, 
-                    data_id, 
-                    parent_id,
-                    model
+                    resource_id BLOB PRIMARY KEY, 
+                    data_id BLOB, 
+                    parent_id BLOB,
+                    model BLOB
                 )"""
             )
             conn.execute(
                 """CREATE TABLE tags (
-                    resource_id, 
-                    tag, 
+                    resource_id BLOB, 
+                    tag TEXT, 
                     FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
                 )"""
             )
             conn.execute(
                 """CREATE TABLE attributes (
-                    resource_id, 
-                    attributes_type, 
-                    field_name, 
+                    resource_id BLOB, 
+                    attributes_type TEXT, 
+                    field_name TEXT, 
                     field_value, 
                     FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
                 )"""
             )
             conn.execute(
                 """CREATE TABLE data_dependencies (
-                    resource_id, 
-                    dependent_resource_id, 
-                    component_id, 
-                    attributes_type, 
-                    range_start, 
-                    range_end, 
+                    resource_id BLOB, 
+                    dependent_resource_id BLOB, 
+                    component_id BLOB, 
+                    attributes_type TEXT, 
+                    range_start INTEGER, 
+                    range_end INTEGER, 
                     FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
                 )"""
             )
             conn.execute(
                 """CREATE TABLE attribute_dependencies (
-                    resource_id, 
-                    attributes_type, 
-                    dependent_resource_id, 
-                    component_id, 
+                    resource_id BLOB, 
+                    attributes_type TEXT, 
+                    dependent_resource_id BLOB, 
+                    component_id BLOB, 
                     FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
                 )"""
             )
             conn.execute(
                 """CREATE TABLE component_versions (
-                    resource_id, 
-                    component_id, 
-                    component_version, 
+                    resource_id BLOB, 
+                    component_id BLOB, 
+                    component_version BLOB, 
                     FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
                 )"""
             )
             conn.execute(
                 """CREATE TABLE components_by_attributes (
-                    resource_id, 
-                    attributes_type, 
-                    component_id, 
-                    version, 
+                    resource_id BLOB, 
+                    attributes_type TEXT, 
+                    component_id BLOB, 
+                    version BLOB, 
                     FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
                 )"""
             )
             conn.execute(
                 """CREATE TABLE closure (
-                    ancestor_id,
-                    descendant_id,
-                    depth,
+                    ancestor_id BLOB,
+                    descendant_id BLOB,
+                    depth INTEGER,
                     FOREIGN KEY (ancestor_id) REFERENCES resources (resource_id),
                     FOREIGN KEY (descendant_id) REFERENCES resources (resource_id)
                 )"""
