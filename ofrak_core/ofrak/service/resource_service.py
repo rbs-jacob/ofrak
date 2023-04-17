@@ -1165,19 +1165,21 @@ class ResourceService(ResourceServiceInterface):
                     ) in resource.components_by_attributes.items()
                 ],
             )
-            conn.executemany(
-                "INSERT INTO closure VALUES (?, ?, ?)",
-                [
-                    (ancestor_id, resource.id, depth + 1)
-                    for (ancestor_id, depth) in conn.execute(
-                        """SELECT ancestor_id, depth FROM closure WHERE closure.descendant_id = ?""",
-                        (resource.parent_id,),
-                    )
-                ]
-                + (
-                    [(resource.parent_id, resource.id, 1)] if resource.parent_id is not None else []
-                ),
-            )
+            if resource.parent_id is not None:
+                conn.execute(
+                    """INSERT INTO closure (ancestor_id, descendant_id, depth)
+                    SELECT ancestor_id, ?, depth + 1
+                    FROM closure
+                    WHERE closure.descendant_id = ?""",
+                    (
+                        resource.id,
+                        resource.parent_id,
+                    ),
+                )
+                conn.execute(
+                    """INSERT INTO closure VALUES (?, ?, ?)""",
+                    (resource.parent_id, resource.id, 1),
+                )
         return resource
 
     async def get_root_resources(self) -> Iterable[ResourceModel]:
@@ -1348,8 +1350,8 @@ class ResourceService(ResourceServiceInterface):
                     (ancestor_id, resource_id, depth + 1)
                     for (ancestor_id, depth) in conn.execute(
                         """SELECT ancestor_id, depth 
-                    FROM closure 
-                    WHERE closure.descendant_id = ?""",
+                           FROM closure 
+                           WHERE closure.descendant_id = ?""",
                         (new_parent_id,),
                     )
                 ]
