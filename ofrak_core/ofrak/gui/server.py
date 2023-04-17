@@ -478,7 +478,6 @@ class AiohttpOFRAKServer:
                 resource = parent
             except NotFoundError:
                 break
-
         return json_response(self._serialize_resource(parent))
 
     @exceptions_to_http(SerializedError)

@@ -1227,6 +1227,8 @@ class ResourceService(ResourceServiceInterface):
                 condition += ")"
                 filter_query_list.append(condition)
                 filter_query_parameters.extend(map(_type_to_str, tag_list))
+        if max_count != -1:
+            filter_query_parameters.append(max_count)
         with self._conn as conn:
             result = [
                 _get_model_by_id(ancestor_id, conn)
@@ -1234,13 +1236,11 @@ class ResourceService(ResourceServiceInterface):
                     f"""SELECT ancestor_id 
                     FROM closure 
                     WHERE descendant_id = ?
-                    {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}""",
+                    {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}
+                    {'LIMIT ?' if max_count != -1 else ''}""",
                     (resource_id, *filter_query_parameters),
                 )
             ]
-            # TODO: Use as LIMIT in SQL query
-            if max_count != -1:
-                return result[:max_count]
             return result
 
     async def get_descendants_by_id(
