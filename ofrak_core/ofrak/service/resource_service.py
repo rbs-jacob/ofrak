@@ -824,12 +824,17 @@ def _delete_resources(
     resource_ids: Iterable[bytes], conn: sqlite3.Connection
 ) -> Iterable[ResourceModel]:
     result = [
-        _get_model_by_id(descendant_id, conn)
+        pickle.loads(model)
         for resource_id in resource_ids
-        for (descendant_id,) in conn.execute(
-            """SELECT descendant_id
-            FROM closure
-            WHERE closure.ancestor_id = ?""",
+        for (model,) in conn.execute(
+            """SELECT model
+            FROM resources
+            INNER JOIN (
+                SELECT descendant_id
+                FROM closure
+                WHERE closure.ancestor_id = ?
+            )
+            ON descendant_id = resources.resource_id""",
             (resource_id,),
         )
     ]
@@ -870,14 +875,19 @@ def _get_descendants(
     if max_count != -1:
         filter_query_parameters.append(max_count)
     return [
-        _get_model_by_id(descendant_id, conn)
-        for (descendant_id,) in conn.execute(
-            f"""SELECT descendant_id
-            FROM closure
-            WHERE ancestor_id = ?
-            {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}
-            ORDER BY depth DESC
-            {'LIMIT ?' if max_count != -1 else ''}""",
+        pickle.loads(model)
+        for (model,) in conn.execute(
+            f"""SELECT model
+            FROM resources
+            INNER JOIN (
+                SELECT descendant_id
+                FROM closure
+                WHERE ancestor_id = ?
+                {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}
+                ORDER BY depth DESC
+                {'LIMIT ?' if max_count != -1 else ''}
+            )
+            ON descendant_id = resources.resource_id""",
             (resource_id, *filter_query_parameters),
         )
     ]
@@ -1173,9 +1183,9 @@ class ResourceService(ResourceServiceInterface):
     async def get_root_resources(self) -> Iterable[ResourceModel]:
         with self._conn as conn:
             return [
-                _get_model_by_id(root_id, conn)
-                for (root_id,) in conn.execute(
-                    "SELECT resource_id FROM resources WHERE resources.parent_id IS NULL"
+                pickle.loads(model)
+                for (model,) in conn.execute(
+                    "SELECT model FROM resources WHERE resources.parent_id IS NULL"
                 )
             ]
 
@@ -1230,7 +1240,6 @@ class ResourceService(ResourceServiceInterface):
             # TODO
             # include_self: bool = False
             # attribute_filters: Optional[Iterable[ResourceAttributeFilter]] = None
-            # max_count
             if r_filter.tags:
                 tag_list = list(r_filter.tags)
                 condition = "ancestor_id IN (SELECT resource_id FROM tags WHERE "
@@ -1245,13 +1254,18 @@ class ResourceService(ResourceServiceInterface):
             filter_query_parameters.append(max_count)
         with self._conn as conn:
             result = [
-                _get_model_by_id(ancestor_id, conn)
-                for (ancestor_id,) in conn.execute(
-                    f"""SELECT ancestor_id 
-                    FROM closure 
-                    WHERE descendant_id = ?
-                    {('AND (' + ' AND '.join(filter_query_list) + ')') if filter_query_list else ''}
-                    {'LIMIT ?' if max_count != -1 else ''}""",
+                pickle.loads(model)
+                for (model,) in conn.execute(
+                    f"""SELECT model
+                    FROM resources
+                    INNER JOIN (
+                        SELECT ancestor_id 
+                        FROM closure 
+                        WHERE descendant_id = ?
+                        {('AND (' + ' AND '.join(filter_query_list) + ')') if filter_query_list else ''}
+                        {'LIMIT ?' if max_count != -1 else ''}
+                    )
+                    ON ancestor_id = resources.resource_id""",
                     (resource_id, *filter_query_parameters),
                 )
             ]
@@ -1294,22 +1308,20 @@ class ResourceService(ResourceServiceInterface):
                 filter_query_list.append(condition)
                 filter_query_parameters.extend(map(_type_to_str, tag_list))
         with self._conn as conn:
-            # TODO: Collapse into one query
-            (parent_id,) = conn.execute(
-                """SELECT parent_id 
-                FROM resources 
-                WHERE resources.resource_id = ?""",
-                (resource_id,),
-            ).fetchone()
             return [
-                _get_model_by_id(sibling_id, conn)
-                for (sibling_id,) in conn.execute(
-                    f"""SELECT resource_id 
+                pickle.loads(model)
+                for (model,) in conn.execute(
+                    f"""SELECT model
                     FROM resources 
-                    WHERE resources.parent_id = ? 
+                    WHERE resources.parent_id = (
+                        SELECT parent_id
+                        FROM resources
+                        WHERE resources.resource_id = ?
+                        LIMIT 1
+                    )
                     AND resources.resource_id != ?
                     {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}""",
-                    (parent_id, resource_id),
+                    (resource_id, resource_id),
                 )
             ]
 
