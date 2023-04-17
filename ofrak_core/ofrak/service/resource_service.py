@@ -714,7 +714,14 @@ def _deserialize_attribute_field(attributes_type, name, data):
     return pickle.loads(data)
 
 
-def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceModel:
+def _get_model_by_id(
+    resource_id: bytes, conn: sqlite3.Connection, force_fetch=False
+) -> ResourceModel:
+    if not force_fetch:
+        (resource_model_data,) = conn.execute(
+            "SELECT model FROM resources WHERE resources.resource_id = ? LIMIT 1", (resource_id,)
+        ).fetchone()
+        return pickle.loads(resource_model_data)
     ids = conn.execute(
         """SELECT data_id, parent_id 
         FROM resources 
@@ -795,7 +802,7 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
             (resource_id,),
         )
     }
-    return ResourceModel(
+    result = ResourceModel(
         id=resource_id,
         data_id=data_id,
         parent_id=parent_id,
@@ -806,6 +813,11 @@ def _get_model_by_id(resource_id: bytes, conn: sqlite3.Connection) -> ResourceMo
         component_versions=component_versions,
         components_by_attributes=components_by_attributes,
     )
+    conn.execute(
+        "UPDATE resources SET model = ? WHERE resources.resource_id = ?",
+        (pickle.dumps(result), resource_id),
+    )
+    return result
 
 
 def _delete_resources(
@@ -826,6 +838,7 @@ def _delete_resources(
         WHERE closure.ancestor_id = ?""",
         [(resource_id,) for resource_id in resource_ids],
     )
+    # TODO: Delete from everywhere else
     return result
 
 
@@ -985,7 +998,7 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
             for attributes_type in diff.attributes_component_removed
         ],
     )
-    return _get_model_by_id(resource_id, conn)
+    return _get_model_by_id(resource_id, conn, force_fetch=True)
 
 
 class ResourceService(ResourceServiceInterface):
@@ -994,16 +1007,17 @@ class ResourceService(ResourceServiceInterface):
             ":memory:",  # detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
         )
         with self._conn as conn:
-            conn.execute("pragma journal_mode = WAL")
-            conn.execute("pragma synchronous = normal")
-            conn.execute("pragma temp_store = memory")
-            conn.execute("pragma mmap_size = 30000000000")
+            conn.execute("PRAGMA journal_mode = WAL;")
+            conn.execute("PRAGMA synchronous = normal;")
+            conn.execute("PRAGMA temp_store = memory;")
+            conn.execute("PRAGMA mmap_size = 30000000000;")
 
             conn.execute(
                 """CREATE TABLE resources (
                     resource_id PRIMARY KEY, 
                     data_id, 
-                    parent_id
+                    parent_id,
+                    model
                 )"""
             )
             conn.execute(
@@ -1072,12 +1086,12 @@ class ResourceService(ResourceServiceInterface):
     async def create(self, resource: ResourceModel) -> ResourceModel:
         with self._conn as conn:
             if conn.execute(
-                "SELECT * FROM resources WHERE resource_id = ?", (resource.id,)
+                "SELECT resource_id FROM resources WHERE resource_id = ?", (resource.id,)
             ).fetchone():
                 raise AlreadyExistError(f"Resource {resource.id.hex()} already exists")
             conn.execute(
-                "INSERT INTO resources VALUES(?, ?, ?)",
-                (resource.id, resource.data_id, resource.parent_id),
+                "INSERT INTO resources VALUES(?, ?, ?, ?)",
+                (resource.id, resource.data_id, resource.parent_id, pickle.dumps(resource)),
             )
             conn.executemany(
                 "INSERT INTO tags VALUES(?, ?)",
@@ -1236,7 +1250,7 @@ class ResourceService(ResourceServiceInterface):
                     f"""SELECT ancestor_id 
                     FROM closure 
                     WHERE descendant_id = ?
-                    {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}
+                    {('AND (' + ' AND '.join(filter_query_list) + ')') if filter_query_list else ''}
                     {'LIMIT ?' if max_count != -1 else ''}""",
                     (resource_id, *filter_query_parameters),
                 )
@@ -1280,6 +1294,7 @@ class ResourceService(ResourceServiceInterface):
                 filter_query_list.append(condition)
                 filter_query_parameters.extend(map(_type_to_str, tag_list))
         with self._conn as conn:
+            # TODO: Collapse into one query
             (parent_id,) = conn.execute(
                 """SELECT parent_id 
                 FROM resources 
