@@ -743,7 +743,8 @@ def _get_model_by_id(
     for (attributes_type, field_name, field_value) in conn.execute(
         """SELECT attributes_type, field_name, field_value 
         FROM attributes 
-        WHERE attributes.resource_id = ?""",
+        WHERE attributes.resource_id = ?
+        AND attributes.indexable != 1""",
         (resource_id,),
     ):
         _attributes[_type_from_str(attributes_type)][field_name] = _deserialize_attribute_field(
@@ -869,6 +870,14 @@ def _get_descendants(
             condition += ")"
             filter_query_list.append(condition)
             filter_query_parameters.extend(map(_type_to_str, tag_list))
+        if r_filter.attribute_filters:
+            for attribute_filter in r_filter.attribute_filters:
+                if isinstance(attribute_filter, ResourceAttributeRangeFilter):
+                    pass
+                elif isinstance(attribute_filter, ResourceAttributeValueFilter):
+                    pass
+                elif isinstance(attribute_filter, ResourceAttributeValuesFilter):
+                    pass
     if max_depth != -1:
         filter_query_list.append("depth <= ?")
         filter_query_parameters.append(max_depth)
@@ -906,13 +915,20 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
         [(resource_id, _type_to_str(tag)) for tag in diff.tags_removed],
     )
     conn.executemany(
-        "INSERT INTO attributes VALUES(?, ?, ?, ?)",
+        "INSERT INTO attributes VALUES(?, ?, ?, ?, ?)",
         [
-            (resource_id, _type_to_str(attributes_type), name, _serialize_attribute_field(value))
+            (
+                resource_id,
+                _type_to_str(attributes_type),
+                name.name,
+                _serialize_attribute_field(getattr(attribute, name.name)),
+                0,
+            )
             for attributes_type, attribute in diff.attributes_added.items()
-            for name, value in dataclasses.asdict(attribute).items()
+            for name in dataclasses.fields(attribute)
         ],
     )
+    # Insert updated indexable attributes values
     conn.executemany(
         """DELETE FROM attributes 
         WHERE attributes.resource_id = ? 
@@ -1043,6 +1059,7 @@ class ResourceService(ResourceServiceInterface):
                     attributes_type TEXT, 
                     field_name TEXT, 
                     field_value, 
+                    indexable INTEGER,
                     FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
                 )"""
             )
@@ -1108,16 +1125,30 @@ class ResourceService(ResourceServiceInterface):
                 [(resource.id, _type_to_str(tag)) for tag in resource.tags],
             )
             conn.executemany(
-                "INSERT INTO attributes VALUES(?, ?, ?, ?)",
+                "INSERT INTO attributes VALUES(?, ?, ?, ?, ?)",
                 [
                     (
                         resource.id,
                         _type_to_str(attributes_type),
-                        name,
-                        _serialize_attribute_field(value),
+                        name.name,
+                        _serialize_attribute_field(getattr(attribute, name.name)),
+                        0,
                     )
                     for attributes_type, attribute in resource.attributes.items()
-                    for name, value in dataclasses.asdict(attribute).items()
+                    for name in dataclasses.fields(attribute)
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO attributes VALUES(?, ?, ?, ?, ?)",
+                [
+                    (
+                        resource.id,
+                        _type_to_str(type(attribute)),
+                        str(attribute),
+                        _serialize_attribute_field(value),
+                        1,
+                    )
+                    for attribute, value in resource.get_index_values().items()
                 ],
             )
             conn.executemany(
@@ -1252,6 +1283,10 @@ class ResourceService(ResourceServiceInterface):
                 condition += ")"
                 filter_query_list.append(condition)
                 filter_query_parameters.extend(map(_type_to_str, tag_list))
+            if r_filter.attribute_filters:
+                for attribute_filter in r_filter.attribute_filters:
+                    attr = attribute_filter.attribute
+                    print(attr)
         if max_count != -1:
             filter_query_parameters.append(max_count)
         with self._conn as conn:
@@ -1291,9 +1326,9 @@ class ResourceService(ResourceServiceInterface):
         r_filter: Optional[ResourceFilter] = None,
         r_sort: Optional[ResourceSort] = None,
     ) -> Iterable[ResourceModel]:
-        if max_count != -1 or r_sort:
+        if r_sort:
             # TODO
-            raise NotImplementedError()
+            logging.warning("Resource sorting implemented")
         filter_query_parameters, filter_query_list = [], []
         if r_filter:
             # TODO
@@ -1309,6 +1344,12 @@ class ResourceService(ResourceServiceInterface):
                 condition += ")"
                 filter_query_list.append(condition)
                 filter_query_parameters.extend(map(_type_to_str, tag_list))
+            if r_filter.attribute_filters:
+                for attribute_filter in r_filter.attribute_filters:
+                    attr = attribute_filter.attribute
+                    print(attr)
+        if max_count != -1:
+            filter_query_parameters.append(max_count)
         with self._conn as conn:
             return [
                 pickle.loads(model)
@@ -1322,8 +1363,9 @@ class ResourceService(ResourceServiceInterface):
                         LIMIT 1
                     )
                     AND resources.resource_id != ?
-                    {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}""",
-                    (resource_id, resource_id),
+                    {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}
+                    {'LIMIT ?' if max_count != -1 else ''}""",
+                    (resource_id, resource_id, *filter_query_parameters),
                 )
             ]
 
