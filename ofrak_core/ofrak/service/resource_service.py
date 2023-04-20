@@ -857,27 +857,40 @@ def _get_descendants(
     r_sort: Optional[ResourceSort] = None,
 ) -> Iterable[ResourceModel]:
     filter_query_parameters, filter_query_list = [], []
-    if r_filter:
-        # TODO
-        # attribute_filters: Optional[Iterable[ResourceAttributeFilter]] = None
-        if r_filter.tags:
-            tag_list = list(r_filter.tags)
-            condition = "closure.descendant_id IN (SELECT resource_id FROM tags WHERE "
-            condition_join = (
-                " AND " if r_filter.tags_condition == ResourceFilterCondition.AND else " OR "
-            )
-            condition += condition_join.join([f"tags.tag = ?"] * len(tag_list))
-            condition += ")"
-            filter_query_list.append(condition)
-            filter_query_parameters.extend(map(_type_to_str, tag_list))
-        if r_filter.attribute_filters:
-            for attribute_filter in r_filter.attribute_filters:
-                if isinstance(attribute_filter, ResourceAttributeRangeFilter):
-                    pass
-                elif isinstance(attribute_filter, ResourceAttributeValueFilter):
-                    pass
-                elif isinstance(attribute_filter, ResourceAttributeValuesFilter):
-                    pass
+    if r_filter and r_filter.tags:
+        tag_list = list(r_filter.tags)
+        condition = "resources.resource_id IN (SELECT resource_id FROM tags WHERE "
+        condition_join = (
+            " AND " if r_filter.tags_condition == ResourceFilterCondition.AND else " OR "
+        )
+        condition += condition_join.join([f"tags.tag = ?"] * len(tag_list))
+        condition += ")"
+        filter_query_list.append(condition)
+        filter_query_parameters.extend(map(_type_to_str, tag_list))
+    join = ""
+    if r_filter and r_filter.attribute_filters:
+        join = "INNER JOIN attributes ON attributes.resource_id = resources.resource_id"
+        for attribute_filter in r_filter.attribute_filters:
+            attribute = attribute_filter.attribute
+            filter_query_list.append("attributes.attributes_type = ?")
+            filter_query_parameters.append(_type_to_str(attribute.attributes_owner))
+            filter_query_list.append("attributes.field_name = ?")
+            filter_query_parameters.append(str(attribute.index_name))
+            if isinstance(attribute_filter, ResourceAttributeRangeFilter):
+                filter_query_list.append("? <= attributes.field_value")
+                filter_query_list.append("attributes.field_value < ?")
+                filter_query_parameters.append(attribute_filter.min)
+                filter_query_parameters.append(attribute_filter.max)
+            elif isinstance(attribute_filter, ResourceAttributeValueFilter):
+                filter_query_list.append("attributes.field_value = ?")
+                filter_query_parameters.append(_serialize_attribute_field(attribute_filter.value))
+            elif isinstance(attribute_filter, ResourceAttributeValuesFilter):
+                filter_query_list.append(
+                    "("
+                    + " OR ".join(["attributes.field_value = ?"] * len(attribute_filter.values))
+                    + ")"
+                )
+                filter_query_parameters.extend(attribute_filter.values)
     if max_depth != -1:
         filter_query_list.append("depth <= ?")
         filter_query_parameters.append(max_depth)
@@ -888,15 +901,13 @@ def _get_descendants(
         for (model,) in conn.execute(
             f"""SELECT model
             FROM resources
-            INNER JOIN (
-                SELECT descendant_id
-                FROM closure
-                WHERE ancestor_id = ?
-                {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}
-                ORDER BY depth DESC
-                {'LIMIT ?' if max_count != -1 else ''}
-            )
-            ON descendant_id = resources.resource_id""",
+            {join}
+            INNER JOIN closure
+            ON closure.descendant_id = resources.resource_id
+            WHERE closure.ancestor_id = ?
+            {('AND ' + ' AND '.join(filter_query_list)) if filter_query_list else ''}
+            ORDER BY depth DESC
+            {'LIMIT ?' if max_count != -1 else ''}""",
             (resource_id, *filter_query_parameters),
         )
     ]
