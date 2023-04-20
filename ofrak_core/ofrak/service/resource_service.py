@@ -1138,13 +1138,14 @@ class ResourceService(ResourceServiceInterface):
                     for name in dataclasses.fields(attribute)
                 ],
             )
+            # TODO: Is this getting all attributes? For example, memory region attributes don't seem to be there.
             conn.executemany(
                 "INSERT INTO attributes VALUES(?, ?, ?, ?, ?)",
                 [
                     (
                         resource.id,
-                        _type_to_str(type(attribute)),
-                        str(attribute),
+                        _type_to_str(attribute.attributes_owner),
+                        str(attribute.index_name),
                         _serialize_attribute_field(value),
                         1,
                     )
@@ -1328,26 +1329,44 @@ class ResourceService(ResourceServiceInterface):
     ) -> Iterable[ResourceModel]:
         if r_sort:
             # TODO
-            logging.warning("Resource sorting implemented")
+            logging.warning("Resource sorting not yet implemented")
         filter_query_parameters, filter_query_list = [], []
-        if r_filter:
-            # TODO
-            # include_self: bool = False
-            # attribute_filters: Optional[Iterable[ResourceAttributeFilter]] = None
-            if r_filter.tags:
-                tag_list = list(r_filter.tags)
-                condition = "resources.resource_id IN (SELECT resource_id FROM tags WHERE "
-                condition_join = (
-                    " AND " if r_filter.tags_condition == ResourceFilterCondition.AND else " OR "
-                )
-                condition += condition_join.join([f"tags.tag = ?"] * len(tag_list))
-                condition += ")"
-                filter_query_list.append(condition)
-                filter_query_parameters.extend(map(_type_to_str, tag_list))
-            if r_filter.attribute_filters:
-                for attribute_filter in r_filter.attribute_filters:
-                    attr = attribute_filter.attribute
-                    print(attr)
+        if r_filter and r_filter.tags:
+            tag_list = list(r_filter.tags)
+            condition = "resources.resource_id IN (SELECT resource_id FROM tags WHERE "
+            condition_join = (
+                " AND " if r_filter.tags_condition == ResourceFilterCondition.AND else " OR "
+            )
+            condition += condition_join.join([f"tags.tag = ?"] * len(tag_list))
+            condition += ")"
+            filter_query_list.append(condition)
+            filter_query_parameters.extend(map(_type_to_str, tag_list))
+        join = ""
+        if r_filter and r_filter.attribute_filters:
+            join = "INNER JOIN attributes ON attributes.resource_id = resources.resource_id"
+            for attribute_filter in r_filter.attribute_filters:
+                attribute = attribute_filter.attribute
+                filter_query_list.append("attributes.attributes_type = ?")
+                filter_query_parameters.append(_type_to_str(attribute.attributes_owner))
+                filter_query_list.append("attributes.field_name = ?")
+                filter_query_parameters.append(str(attribute.index_name))
+                if isinstance(attribute_filter, ResourceAttributeRangeFilter):
+                    filter_query_list.append("? <= attributes.field_value")
+                    filter_query_list.append("attributes.field_value < ?")
+                    filter_query_parameters.append(attribute_filter.min)
+                    filter_query_parameters.append(attribute_filter.max)
+                elif isinstance(attribute_filter, ResourceAttributeValueFilter):
+                    filter_query_list.append("attributes.field_value = ?")
+                    filter_query_parameters.append(
+                        _serialize_attribute_field(attribute_filter.value)
+                    )
+                elif isinstance(attribute_filter, ResourceAttributeValuesFilter):
+                    filter_query_list.append(
+                        "("
+                        + " OR ".join(["attributes.field_value = ?"] * len(attribute_filter.values))
+                        + ")"
+                    )
+                    filter_query_parameters.extend(attribute_filter.values)
         if max_count != -1:
             filter_query_parameters.append(max_count)
         with self._conn as conn:
@@ -1356,6 +1375,7 @@ class ResourceService(ResourceServiceInterface):
                 for (model,) in conn.execute(
                     f"""SELECT model
                     FROM resources 
+                    {join}
                     WHERE resources.parent_id = (
                         SELECT parent_id
                         FROM resources
