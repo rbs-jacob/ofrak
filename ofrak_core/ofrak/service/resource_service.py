@@ -1057,6 +1057,7 @@ class ResourceService(ResourceServiceInterface):
                     model BLOB
                 )"""
             )
+            conn.execute("CREATE INDEX index_resource_id ON resources (resource_id)")
             conn.execute(
                 """CREATE TABLE tags (
                     resource_id BLOB, 
@@ -1064,6 +1065,7 @@ class ResourceService(ResourceServiceInterface):
                     FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
                 )"""
             )
+            conn.execute("CREATE INDEX index_tag ON tags (tag)")
             conn.execute(
                 """CREATE TABLE attributes (
                     resource_id BLOB, 
@@ -1073,6 +1075,9 @@ class ResourceService(ResourceServiceInterface):
                     indexable INTEGER,
                     FOREIGN KEY (resource_id) REFERENCES resources (resource_id)
                 )"""
+            )
+            conn.execute(
+                "CREATE INDEX index_attributes_value ON attributes (attributes_type, field_name, field_value)"
             )
             conn.execute(
                 """CREATE TABLE data_dependencies (
@@ -1120,6 +1125,8 @@ class ResourceService(ResourceServiceInterface):
                     FOREIGN KEY (descendant_id) REFERENCES resources (resource_id)
                 )"""
             )
+            conn.execute("CREATE INDEX index_ancestor_id ON closure (ancestor_id)")
+            conn.execute("CREATE INDEX index_descendant_id ON closure (descendant_id)")
 
     async def create(self, resource: ResourceModel) -> ResourceModel:
         with self._conn as conn:
