@@ -915,6 +915,7 @@ def _get_descendants(
 
 def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
     resource_id = diff.id
+    updated_resource = diff.apply(_get_model_by_id(resource_id, conn))
     conn.executemany(
         "INSERT INTO tags VALUES(?, ?)",
         [(resource_id, _type_to_str(tag)) for tag in diff.tags_added],
@@ -939,7 +940,19 @@ def _update(diff: ResourceModelDiff, conn: sqlite3.Connection) -> ResourceModel:
             for name in dataclasses.fields(attribute)
         ],
     )
-    # Insert updated indexable attributes values
+    conn.executemany(
+        "INSERT INTO attributes VALUES(?, ?, ?, ?, ?)",
+        [
+            (
+                resource_id,
+                _type_to_str(attribute.attributes_owner),
+                attribute.index_name,
+                _serialize_attribute_field(value),
+                1,
+            )
+            for attribute, value in updated_resource.get_index_values().items()
+        ],
+    )
     conn.executemany(
         """DELETE FROM attributes 
         WHERE attributes.resource_id = ? 
@@ -1159,7 +1172,6 @@ class ResourceService(ResourceServiceInterface):
                     for name in dataclasses.fields(attribute)
                 ],
             )
-            # TODO: Is this getting all attributes? For example, memory region attributes don't seem to be there.
             conn.executemany(
                 "INSERT INTO attributes VALUES(?, ?, ?, ?, ?)",
                 [
