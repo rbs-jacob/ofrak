@@ -1058,6 +1058,7 @@ class ResourceService(ResourceServiceInterface):
                 )"""
             )
             conn.execute("CREATE INDEX index_resource_id ON resources (resource_id)")
+            conn.execute("CREATE INDEX index_parent_id ON resources (parent_id)")
             conn.execute(
                 """CREATE TABLE tags (
                     resource_id BLOB, 
@@ -1066,6 +1067,7 @@ class ResourceService(ResourceServiceInterface):
                 )"""
             )
             conn.execute("CREATE INDEX index_tag ON tags (tag)")
+            conn.execute("CREATE INDEX index_tags_resource_id ON tags (resource_id)")
             conn.execute(
                 """CREATE TABLE attributes (
                     resource_id BLOB, 
@@ -1079,6 +1081,7 @@ class ResourceService(ResourceServiceInterface):
             conn.execute(
                 "CREATE INDEX index_attributes_value ON attributes (attributes_type, field_name, field_value)"
             )
+            conn.execute("CREATE INDEX index_attributes_resource_id ON attributes (resource_id)")
             conn.execute(
                 """CREATE TABLE data_dependencies (
                     resource_id BLOB, 
@@ -1287,7 +1290,7 @@ class ResourceService(ResourceServiceInterface):
     async def get_ancestors_by_id(
         self, resource_id: bytes, max_count: int = -1, r_filter: Optional[ResourceFilter] = None
     ) -> Iterable[ResourceModel]:
-        filter_query_parameters, filter_query_list = [], []
+        filter_query_parameters, filter_query_list = [resource_id], []
         if r_filter and r_filter.tags:
             tag_list = list(r_filter.tags)
             condition = "resources.resource_id IN (SELECT resource_id FROM tags WHERE "
@@ -1339,7 +1342,7 @@ class ResourceService(ResourceServiceInterface):
                     {('AND (' + ' AND '.join(filter_query_list) + ')') if filter_query_list else ''}
                     ORDER BY closure.depth ASC
                     {'LIMIT ?' if max_count != -1 else ''}""",
-                    (resource_id, *filter_query_parameters),
+                    filter_query_parameters,
                 )
             ]
             return result
