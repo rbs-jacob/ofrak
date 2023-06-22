@@ -19,3 +19,4 @@ synthol~=0.1.1
 typeguard~=2.13.3
 ubi-reader==0.8.5
 xattr==0.10.1;platform_system!="Windows"
+vmlinux-to-elf @ https://github.com/marin-m/vmlinux-to-elf/archive/refs/heads/master.zip
