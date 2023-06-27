@@ -8,7 +8,6 @@ from ofrak.core.elf.lief_modifier import *
 from ofrak.core.pe.unpacker import *
 from ofrak.core.pe.model import *
 
-from ofrak.core.patch_maker.model import *
 from ofrak.core.patch_maker.linkable_binary import *
 from ofrak.core.patch_maker.linkable_symbol import *
 from ofrak.core.patch_maker.modifiers import *
@@ -31,6 +30,7 @@ from ofrak.core.dtb import *
 from ofrak.core.filesystem import *
 from ofrak.core.flash import *
 from ofrak.core.free_space import *
+from ofrak.core.run_script_modifier import *
 from ofrak.core.gzip import *
 from ofrak.core.injector import *
 from ofrak.core.instruction import *

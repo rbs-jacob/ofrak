@@ -7,6 +7,7 @@ import re
 import subprocess
 
 from ofrak.core import MemoryRegion
+from ofrak.model.resource_model import EphemeralResourceContextFactory, ClientResourceContextFactory
 from ofrak_patch_maker.toolchain.gnu_x64 import GNU_X86_64_LINUX_EABI_10_3_0_Toolchain
 
 from ofrak_patch_maker.toolchain.gnu_arm import GNU_ARM_NONE_EABI_10_2_1_Toolchain
@@ -25,12 +26,12 @@ from ofrak.core.basic_block import BasicBlock
 from ofrak.core.complex_block import ComplexBlock
 from ofrak.core.program import Program
 from ofrak.core.patch_maker.linkable_symbol import LinkableSymbolType
-from ofrak.core.patch_maker.model import SourceBundle
 from ofrak.core.patch_maker.modifiers import (
     FunctionReplacementModifierConfig,
     FunctionReplacementModifier,
     SegmentInjectorModifierConfig,
     SegmentInjectorModifier,
+    SourceBundle,
 )
 from ofrak_patch_maker.toolchain.model import (
     CompilerOptimizationLevel,
@@ -45,6 +46,12 @@ from ofrak_type.endianness import Endianness
 PATCH_DIRECTORY = str(Path(__file__).parent / "assets" / "src")
 X86_64_PROGRAM_PATH = str(Path(__file__).parent / "assets" / "hello.out")
 ARM32_PROGRAM_PATH = str(Path(__file__).parent / "assets" / "simple_arm_gcc.o.elf")
+
+
+@pytest.fixture(params=[EphemeralResourceContextFactory, ClientResourceContextFactory])
+async def ofrak_context(request, ofrak_context):
+    ofrak_context._resource_context_factory = request.param()
+    return ofrak_context
 
 
 def normalize_assembly(assembly_str: str) -> str:
@@ -133,8 +140,11 @@ TEST_CASE_CONFIGS = [
         LLVM_12_0_1_Toolchain,
         [
             "00000000004004c4 <main>:",
-            "  4004c4: 6a 03                         pushq $3",
-            "  4004c6: 58                            popq %rax",
+            "  4004c4: 55 pushq %rbp",
+            "  4004c5: 48 89 e5 movq %rsp, %rbp",
+            "  4004c8: b8 03 00 00 00 movl $3, %eax",
+            "  4004cd: 5d popq %rbp",
+            "  4004ce: c3 retq",
         ],
     ),
     FunctionReplacementTestCaseConfig(
@@ -178,10 +188,6 @@ async def test_function_replacement_modifier(ofrak_context: OFRAKContext, config
     await root_resource.unpack_recursively()
     target_program = await root_resource.view_as(Program)
 
-    source_bundle_r = await target_program.resource.create_child(data=b"", tags=(SourceBundle,))
-    source_bundle = await source_bundle_r.view_as(SourceBundle)
-    await source_bundle.initialize_from_disk(PATCH_DIRECTORY)
-
     function_cb = ComplexBlock(
         virtual_address=config.program.function_vaddr,
         size=config.program.function_size,
@@ -207,7 +213,7 @@ async def test_function_replacement_modifier(ofrak_context: OFRAKContext, config
     await target_program.resource.save()
 
     function_replacement_config = FunctionReplacementModifierConfig(
-        source_bundle.resource.get_id(),
+        SourceBundle.slurp(PATCH_DIRECTORY),
         {config.program.function_name: config.replacement_patch},
         ToolchainConfig(
             file_format=BinFileType.ELF,

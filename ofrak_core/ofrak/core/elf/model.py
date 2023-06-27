@@ -1,3 +1,4 @@
+import re
 from abc import abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -226,6 +227,19 @@ class ElfSegmentStructure(ResourceView):
     def SegmentIndex(self) -> int:
         return self.segment_index
 
+    async def get_header(self) -> "ElfProgramHeader":
+        return await self.resource.get_only_sibling_as_view(
+            ElfProgramHeader,
+            ResourceFilter(
+                tags=(ElfProgramHeader,),
+                attribute_filters=(
+                    ResourceAttributeValueFilter(
+                        ElfSegmentStructure.SegmentIndex, self.segment_index
+                    ),
+                ),
+            ),
+        )
+
 
 ##################################################################################
 #                           ELF PROGRAM HEADER
@@ -294,29 +308,9 @@ class ElfProgramHeader(ElfSegmentStructure):
 
 
 @dataclass
-class UnanalyzedElfSegment(ElfSegmentStructure):
+class ElfSegment(ElfSegmentStructure, ProgramSegment):
     """
-    An unanalyzed ELF Segment
-    """
-
-    async def get_header(self) -> "ElfProgramHeader":
-        return await self.resource.get_only_sibling_as_view(
-            ElfProgramHeader,
-            ResourceFilter(
-                tags=(ElfProgramHeader,),
-                attribute_filters=(
-                    ResourceAttributeValueFilter(
-                        ElfSegmentStructure.SegmentIndex, self.segment_index
-                    ),
-                ),
-            ),
-        )
-
-
-@dataclass
-class ElfSegment(UnanalyzedElfSegment, ProgramSegment):
-    """
-    An analyzed ELF Segment
+    An ELF Segment.
     """
 
 
@@ -332,7 +326,20 @@ class ElfSectionStructure(ResourceView):
         return self.section_index
 
     async def get_elf(self) -> "Elf":
-        return await self.resource.get_only_ancestor_as_view(Elf, ResourceFilter.with_tags(Elf))
+        return await self.resource.get_parent_as_view(Elf)
+
+    async def get_header(self) -> "ElfSectionHeader":
+        return await self.resource.get_only_sibling_as_view(
+            ElfSectionHeader,
+            ResourceFilter(
+                tags=(ElfSectionHeader,),
+                attribute_filters=(
+                    ResourceAttributeValueFilter(
+                        ElfSectionStructure.SectionIndex, self.section_index
+                    ),
+                ),
+            ),
+        )
 
 
 ##################################################################################
@@ -506,10 +513,10 @@ class ElfSymbol(ElfSymbolStructure):
     async def get_name(self) -> str:
         elf = await self.resource.get_only_ancestor_as_view(Elf, ResourceFilter.with_tags(Elf))
         string_section = await elf.get_string_section()
-        string_section_data = await string_section.resource.get_data(Range(self.st_name, Range.MAX))
-        name_string_end = string_section_data.find(b"\x00")
-        raw_symbol_name = string_section_data[:name_string_end]
-        return raw_symbol_name.decode("ascii")
+        ((_, raw_symbol_name),) = await string_section.resource.search_data(
+            re.compile(b".[^\x00]+\x00"), start=self.st_name, max_matches=1
+        )
+        return raw_symbol_name[:-1].decode("ascii")
 
     @index
     def SymbolValue(self) -> int:
@@ -637,37 +644,14 @@ class ElfVirtualAddress(ResourceView):
 
 
 @dataclass
-class UnanalyzedElfSection(ElfSectionStructure):
+class ElfSection(ElfSectionStructure, NamedProgramSection):
     """
-    An unanalyzed ELF Section
-    """
-
-    async def get_parent(self) -> "Elf":
-        return await self.resource.get_parent_as_view(Elf)
-
-    async def get_header(self) -> "ElfSectionHeader":
-        return await self.resource.get_only_sibling_as_view(
-            ElfSectionHeader,
-            ResourceFilter(
-                tags=(ElfSectionHeader,),
-                attribute_filters=(
-                    ResourceAttributeValueFilter(
-                        ElfSectionStructure.SectionIndex, self.section_index
-                    ),
-                ),
-            ),
-        )
-
-
-@dataclass
-class ElfSection(UnanalyzedElfSection, NamedProgramSection):
-    """
-    An analyzed ELF Section
+    An ELF Section.
     """
 
 
 @dataclass
-class ElfPointerArraySection(UnanalyzedElfSection):
+class ElfPointerArraySection(ElfSection):
     """
     An ELF Section that can be interpreted as an array of pointers.
 
@@ -738,7 +722,7 @@ class ElfDynSymbolSection(ElfSymbolSection):
     pass
 
 
-class ElfStringSection(UnanalyzedElfSection):
+class ElfStringSection(ElfSectionStructure):
     """
     A section with the STRTAB flag. There may be several of these in an ELF.
     """

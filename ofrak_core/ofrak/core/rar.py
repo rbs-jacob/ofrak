@@ -1,14 +1,16 @@
-import subprocess
+import asyncio
 import tempfile
 from dataclasses import dataclass
+from subprocess import CalledProcessError
 
 from ofrak.component.unpacker import Unpacker
 from ofrak.core.binary import GenericBinary
 from ofrak.core.filesystem import FilesystemRoot, File, Folder, SpecialFileType
 
 from ofrak.core.magic import MagicMimeIdentifier, MagicDescriptionIdentifier
-from ofrak.model.component_model import CC, ComponentExternalTool
+from ofrak.model.component_model import ComponentExternalTool
 from ofrak.resource import Resource
+from ofrak.model.component_model import ComponentConfig
 
 UNAR = ComponentExternalTool(
     "unar",
@@ -35,15 +37,26 @@ class RarUnpacker(Unpacker[None]):
     children = (File, Folder, SpecialFileType)
     external_dependencies = (UNAR,)
 
-    async def unpack(self, resource: Resource, config: CC):
+    async def unpack(self, resource: Resource, config: ComponentConfig = None):
         with tempfile.NamedTemporaryFile(
             suffix=".rar"
         ) as temp_archive, tempfile.TemporaryDirectory() as temp_dir:
             temp_archive.write(await resource.get_data())
             temp_archive.flush()
 
-            command = ["unar", "-no-directory", "-no-recursion", temp_archive.name]
-            subprocess.run(command, cwd=temp_dir, check=True, capture_output=True)
+            cmd = [
+                "unar",
+                "-no-directory",
+                "-no-recursion",
+                temp_archive.name,
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=temp_dir,
+            )
+            returncode = await proc.wait()
+            if proc.returncode:
+                raise CalledProcessError(returncode=returncode, cmd=cmd)
 
             rar_view = await resource.view_as(RarArchive)
             await rar_view.initialize_from_disk(temp_dir)

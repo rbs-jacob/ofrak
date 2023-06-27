@@ -17,6 +17,8 @@ from typing import (
     Sequence,
     Callable,
     Set,
+    Pattern,
+    overload,
 )
 
 from ofrak.component.interface import ComponentInterface
@@ -242,6 +244,42 @@ class Resource:
             )
         return await self._data_service.get_data_range_within_root(self._resource.data_id)
 
+    @overload
+    async def search_data(
+        self,
+        query: Pattern[bytes],
+        start: Optional[int] = None,
+        end: Optional[int] = None,
+        max_matches: Optional[int] = None,
+    ) -> Tuple[Tuple[int, bytes], ...]:
+        ...
+
+    @overload
+    async def search_data(
+        self,
+        query: bytes,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
+        max_matches: Optional[int] = None,
+    ) -> Tuple[int, ...]:
+        ...
+
+    async def search_data(self, query, start=None, end=None, max_matches=None):
+        """
+        Search for some data in this resource. The query may be a regex pattern (a return value
+        of `re.compile`). If the query is a regex pattern, returns a list of pairs with both the
+        offset of the match and the contents of the match itself. If the query is plain bytes, a
+        list of only the match offsets are returned.
+
+        :param query: Plain bytes to exactly match or a regex pattern to search for
+        :param start: Start offset in the data model to begin searching
+        :param end: End offset in the data model to stop searching
+
+        :return: A list of offsets matching a plain bytes query, or a list of (offset, match) pairs
+        for a regex pattern query
+        """
+        return await self._data_service.search(self.get_data_id(), query, start, end, max_matches)
+
     async def save(self):
         """
         If this resource has been modified, update the model stored in the resource service with
@@ -294,7 +332,10 @@ class Resource:
         try:
             fetched_resource = await self._resource_service.get_by_id(resource.id)
         except NotFoundError:
-            if resource.id in self._component_context.modification_trackers:
+            if (
+                resource.id in self._component_context.modification_trackers
+                and resource.id in self._resource_context.resource_models
+            ):
                 del self._resource_context.resource_models[resource.id]
             return
 
@@ -314,6 +355,9 @@ class Resource:
             for view in views_in_context.values():
                 if resource_id not in self._resource_context.resource_models:
                     await self._fetch(view.resource.get_model())  # type: ignore
+                if resource_id not in self._resource_context.resource_models:
+                    view.set_deleted()
+                    continue
                 updated_model = self._resource_context.resource_models[resource_id]
                 fresh_view = view.create(updated_model)
                 for field in dataclasses.fields(fresh_view):
@@ -421,7 +465,7 @@ class Resource:
         """
         attributes = self._check_attributes(resource_attributes)
         if attributes is None:
-            await self._analyze_attributes(resource_attributes)
+            await self._analyze_attributes((resource_attributes,))
             return self.get_attributes(resource_attributes)
         else:
             return attributes
@@ -533,13 +577,13 @@ class Resource:
 
         destination.write(await self.get_data())
 
-    async def _analyze_attributes(self, attribute_type: Type[ResourceAttributes]):
+    async def _analyze_attributes(self, attribute_types: Tuple[Type[ResourceAttributes], ...]):
         job_context = self._job_context
         components_result = await self._job_service.run_analyzer_by_attribute(
             JobAnalyzerRequest(
                 self._job_id,
                 self._resource.id,
-                attribute_type,
+                attribute_types,
                 tuple(self._resource.tags),
             ),
             job_context,
@@ -747,21 +791,23 @@ class Resource:
             self._resource_view_context.add_view(self.get_id(), view)
             return cast(RV, view)
 
-        analysis_tasks = [
-            self._analyze_attributes(attrs_t)
-            for attrs_t, existing in zip(composed_attrs_types, existing_attributes)
-            if not existing
-        ]
-
         # Only if analysis is absolutely necessary is an awaitable created and returned
-        async def finish_view_creation() -> RV:
-            await asyncio.gather(*analysis_tasks)
+        async def finish_view_creation(
+            attrs_to_analyze: Tuple[Type[ResourceAttributes], ...]
+        ) -> RV:
+            await self._analyze_attributes(attrs_to_analyze)
             view = viewable_tag.create(self.get_model())
             view.resource = self  # type: ignore
             self._resource_view_context.add_view(self.get_id(), view)
             return cast(RV, view)
 
-        return finish_view_creation()
+        return finish_view_creation(
+            tuple(
+                attrs_t
+                for attrs_t, existing in zip(composed_attrs_types, existing_attributes)
+                if not existing
+            )
+        )
 
     async def view_as(self, viewable_tag: Type[RV]) -> RV:
         """

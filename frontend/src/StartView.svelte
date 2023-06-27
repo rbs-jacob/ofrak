@@ -11,7 +11,19 @@
   }
 
   form {
+    width: 35%;
     max-width: 50%;
+    display: flex;
+  }
+
+  form > select {
+    max-width: 90%;
+    flex-grow: 1;
+  }
+
+  form > button {
+    max-width: 10%;
+    flex-grow: 1;
   }
 
   .center {
@@ -81,10 +93,6 @@
   .clickable {
     cursor: pointer;
   }
-
-  .underline {
-    text-decoration: underline;
-  }
 </style>
 
 <script>
@@ -94,7 +102,7 @@
   import TextDivider from "./TextDivider.svelte";
 
   import { animals } from "./animals.js";
-  import { selected } from "./stores.js";
+  import { selected, settings } from "./stores.js";
   import { remote_model_to_resource } from "./ofrak/remote_resource";
 
   import { onMount } from "svelte";
@@ -113,8 +121,21 @@
     tryHash = !!window.location.hash;
   let mouseX, selectedAnimal;
   const warnFileSize = 250 * 1024 * 1024;
+  const fileChunkSize = warnFileSize;
+
+  async function sendChunk(id, f, start) {
+    let end = Math.min(start + fileChunkSize, f.size);
+    await fetch(
+      `${$settings.backendUrl}/root_resource_chunk?id=${id}&start=${start}&end=${end}`,
+      {
+        method: "POST",
+        body: await f.slice(start, end),
+      }
+    );
+  }
 
   async function createRootResource(f) {
+    let rootModel;
     if (
       f.size > warnFileSize &&
       !window.confirm(
@@ -126,12 +147,34 @@
       showRootResource = false;
       return;
     }
+    if (f.size > warnFileSize) {
+      let id = await fetch(
+        `${$settings.backendUrl}/init_chunked_root_resource?name=${f.name}&size=${f.size}`,
+        { method: "POST" }
+      ).then((r) => r.json());
+      let chunkStartAddrs = Array.from(
+        { length: Math.ceil(f.size / fileChunkSize) },
+        (v, i) => i * fileChunkSize
+      );
+      await Promise.all(
+        chunkStartAddrs.map((start) => sendChunk(id, f, start))
+      );
 
-    const rootModel = await fetch(`/create_root_resource?name=${f.name}`, {
-      method: "POST",
-      body: await f.arrayBuffer(),
-    }).then((r) => r.json());
-
+      rootModel = await fetch(
+        `${$settings.backendUrl}/create_chunked_root_resource?id=${id}&name=${f.name}`,
+        {
+          method: "POST",
+        }
+      ).then((r) => r.json());
+    } else {
+      rootModel = await fetch(
+        `${$settings.backendUrl}/create_root_resource?name=${f.name}`,
+        {
+          method: "POST",
+          body: await f.arrayBuffer(),
+        }
+      ).then((r) => r.json());
+    }
     rootResource = remote_model_to_resource(rootModel, resources);
     $selected = rootModel.id;
   }
@@ -168,7 +211,9 @@
   }
 
   async function getResourcesFromHash(resourceId) {
-    const root = await fetch(`/${resourceId}/get_root`).then((r) => {
+    const root = await fetch(
+      `${$settings.backendUrl}/${resourceId}/get_root`
+    ).then((r) => {
       if (!r.ok) {
         throw Error(r.statusText);
       }
@@ -178,19 +223,23 @@
     rootResource = remote_model_to_resource(root, resources);
     $selected = root.id;
 
-    let resource = await fetch(`/${resourceId}/`).then((r) => {
-      if (!r.ok) {
-        throw Error(r.statusText);
+    let resource = await fetch(`${$settings.backendUrl}/${resourceId}/`).then(
+      (r) => {
+        if (!r.ok) {
+          throw Error(r.statusText);
+        }
+        return r.json();
       }
-      return r.json();
-    });
+    );
     resources[resource.id] = remote_model_to_resource(resource, resources);
     if (resourceNodeDataMap[resource.id] === undefined) {
       resourceNodeDataMap[resource.id] = {};
     }
     resourceNodeDataMap[resource.id].collapsed = false;
     while (resource.parent_id) {
-      resource = await fetch(`/${resource.parent_id}/`).then((r) => {
+      resource = await fetch(
+        `${$settings.backendUrl}/${resource.parent_id}/`
+      ).then((r) => {
         if (!r.ok) {
           throw Error(r.statusText);
         }
@@ -218,9 +267,9 @@
   }
 
   onMount(async () => {
-    preExistingRootsPromise = await fetch(`/get_root_resources`).then((r) =>
-      r.json()
-    );
+    preExistingRootsPromise = await fetch(
+      `${$settings.backendUrl}/get_root_resources`
+    ).then((r) => r.json());
   });
 </script>
 

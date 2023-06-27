@@ -19,15 +19,16 @@
   import { onMount, tick } from "svelte";
   import { shortcuts } from "./keyboard";
 
-  export let dataPromise, scrollY;
+  export let dataLenPromise, scrollY;
   let startOffset,
     input,
     mounted = false;
   const alignment = 16;
 
   let dataLength = 0;
-  $: dataPromise.then((data) => {
-    dataLength = data.byteLength;
+
+  $: dataLenPromise.then((r) => {
+    dataLength = r;
   });
 
   onMount(() => {
@@ -42,7 +43,7 @@
 
   $: if (mounted) {
     startOffset = Math.max(
-      Math.ceil((dataLength * $scrollY.top) / alignment) * alignment,
+      Math.floor((dataLength * $scrollY.top) / alignment) * alignment,
       0
     );
     input.value = `0x${startOffset.toString(16)}`;
@@ -55,7 +56,7 @@
     if (e.key === 'Enter') {
       input.blur();
       try {
-        let result = calculator.calculate(input.value);
+        let result = calculator.calculate(input.value) + 1;
         $scrollY.top = result / dataLength;
       } catch (_) {
         input.value = `0x${startOffset.toString(16)}`;

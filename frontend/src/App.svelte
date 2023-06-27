@@ -35,18 +35,20 @@
   import ByteclassView from "./ByteclassView.svelte";
   import CarouselSelector from "./CarouselSelector.svelte";
   import EntropyView from "./EntropyView.svelte";
+  import Gamepad from "./Gamepad.svelte";
   import HexView from "./HexView.svelte";
   import JumpToOffset from "./JumpToOffset.svelte";
   import LoadingAnimation from "./LoadingAnimation.svelte";
   import MagnitudeView from "./MagnitudeView.svelte";
   import Pane from "./Pane.svelte";
   import ResourceTreeView from "./ResourceTreeView.svelte";
+  import ScriptView from "./ScriptView.svelte";
   import Split from "./Split.svelte";
   import StartView from "./StartView.svelte";
   import TextView from "./TextView.svelte";
 
   import { printConsoleArt } from "./console-art.js";
-  import { selected, selectedResource } from "./stores.js";
+  import { selected, selectedResource, settings } from "./stores.js";
   import { keyEventToString, shortcuts } from "./keyboard.js";
 
   import { writable } from "svelte/store";
@@ -54,15 +56,20 @@
   printConsoleArt();
 
   let showRootResource = false,
-    displayDataPromise = Promise.resolve([]),
+    dataLenPromise = Promise.resolve([]),
     hexScrollY = writable({}),
     useAssemblyView = false,
     useTextView = false,
     rootResourceLoadPromise = new Promise((resolve) => {}),
     resourceNodeDataMap = {},
     resources = {};
-  let carouselSelection, currentResource, rootResource, modifierView;
+  let carouselSelection,
+    currentResource,
+    rootResource,
+    modifierView,
+    bottomLeftPane;
 
+  // TODO: Move to settings
   let riddleAnswered = JSON.parse(window.localStorage.getItem("riddleSolved"));
   if (riddleAnswered === null || riddleAnswered === undefined) {
     riddleAnswered = false;
@@ -74,7 +81,7 @@
       console.error("Couldn't get the resource for ID " + $selected);
     } else {
       $selectedResource = currentResource;
-      displayDataPromise = currentResource.get_data();
+      dataLenPromise = currentResource.get_data_length();
       useAssemblyView = [
         "ofrak.core.complex_block.ComplexBlock",
         "ofrak.core.basic_block.BasicBlock",
@@ -104,9 +111,12 @@
 
   function handleShortcut(e) {
     // Don't handle keypresses from within text inputs.
+    // Disable shortcuts in views with text inputs, otherwise misclicking outside of a text area may
+    // cause users to accidentally run shortcuts.
     if (
       ["input", "textarea"].includes(e.target?.tagName.toLocaleLowerCase()) ||
-      e.target.isContentEditable
+      e.target.isContentEditable ||
+      modifierView
     ) {
       return;
     }
@@ -143,9 +153,21 @@ Answer by running riddle.answer('your answer here') from the console.`);
     },
   };
   window.riddle.ask();
+
+  // Use colors from settings
+  const docstyle = document.documentElement.style;
+  $: docstyle.setProperty("--main-bg-color", $settings.background);
+  $: docstyle.setProperty("--main-fg-color", $settings.foreground);
+  $: docstyle.setProperty("--selected-bg-color", $settings.selected);
+  $: docstyle.setProperty("--highlight-color", $settings.highlight);
+  $: docstyle.setProperty("--comment-color", $settings.comment);
+  $: docstyle.setProperty("--accent-text-color", $settings.accentText);
+  $: docstyle.setProperty("--last-modified-color", $settings.lastModified);
+  $: docstyle.setProperty("--all-modified-color", $settings.allModified);
 </script>
 
 <svelte:window on:popstate="{backButton}" on:keyup="{handleShortcut}" />
+<Gamepad />
 
 {#if showRootResource}
   {#await rootResourceLoadPromise}
@@ -157,20 +179,28 @@ Answer by running riddle.answer('your answer here') from the console.`);
           {#if modifierView}
             <svelte:component
               this="{modifierView}"
-              dataPromise="{displayDataPromise}"
+              dataLenPromise="{dataLenPromise}"
               bind:modifierView="{modifierView}"
               bind:resourceNodeDataMap="{resourceNodeDataMap}"
             />
           {:else}
             <ResourceTreeView
               rootResource="{rootResource}"
+              bind:bottomLeftPane="{bottomLeftPane}"
               bind:resourceNodeDataMap="{resourceNodeDataMap}"
               bind:modifierView="{modifierView}"
             />
           {/if}
         </Pane>
         <Pane slot="second" paddingVertical="{'1em'}">
-          <AttributesView resource="{currentResource}" />
+          {#if bottomLeftPane}
+            <svelte:component
+              this="{bottomLeftPane}"
+              bind:bottomLeftPane="{bottomLeftPane}"
+            />
+          {:else}
+            <AttributesView resource="{currentResource}" />
+          {/if}
         </Pane>
       </Split>
       <Pane
@@ -181,10 +211,10 @@ Answer by running riddle.answer('your answer here') from the console.`);
         {#if useAssemblyView}
           <AssemblyView />
         {:else if useTextView}
-          <TextView dataPromise="{displayDataPromise}" />
+          <TextView />
         {:else}
           <HexView
-            dataPromise="{displayDataPromise}"
+            dataLenPromise="{dataLenPromise}"
             resources="{resources}"
             scrollY="{hexScrollY}"
             bind:resourceNodeDataMap="{resourceNodeDataMap}"
@@ -196,7 +226,7 @@ Answer by running riddle.answer('your answer here') from the console.`);
         -->
         <svelte:fragment slot="minimap">
           <JumpToOffset
-            dataPromise="{displayDataPromise}"
+            dataLenPromise="{dataLenPromise}"
             scrollY="{hexScrollY}"
           />
           {#if carouselSelection === "Entropy"}
@@ -233,5 +263,5 @@ Answer by running riddle.answer('your answer here') from the console.`);
 {/if}
 
 <div class="bottomright">
-  <p><a href="https://ofrak.com" target="_blank" rel="noreferrer">v2.2.0</a></p>
+  <p><a href="https://ofrak.com" target="_blank" rel="noreferrer">v3.1.0</a></p>
 </div>

@@ -1,9 +1,12 @@
 import asyncio
 import logging
 import os
+import tempfile
 import time
 from types import ModuleType
 from typing import Type, Any, Awaitable, Callable, List, Iterable, Optional
+
+import ofrak_patch_maker
 
 from ofrak_type import InvalidStateError
 from synthol.injector import DependencyInjector
@@ -12,7 +15,10 @@ from ofrak.component.interface import ComponentInterface
 from ofrak.core.binary import GenericBinary
 from ofrak.core.filesystem import File, FilesystemRoot
 from ofrak.model.component_model import ClientComponentContext
-from ofrak.model.resource_model import ResourceModel, ClientResourceContextFactory
+from ofrak.model.resource_model import (
+    ResourceModel,
+    EphemeralResourceContextFactory,
+)
 from ofrak.model.tag_model import ResourceTag
 from ofrak.model.viewable_tag_model import ResourceViewContext
 from ofrak.resource import Resource, ResourceFactory
@@ -24,6 +30,7 @@ from ofrak.service.job_service_i import JobServiceInterface
 from ofrak.service.resource_service_i import ResourceServiceInterface
 
 LOGGER = logging.getLogger("ofrak")
+DEFAULT_OFRAK_LOG_FILE = os.path.join(tempfile.gettempdir(), "ofrak.log")
 
 
 class OFRAKContext:
@@ -46,7 +53,7 @@ class OFRAKContext:
         self.resource_service = resource_service
         self.job_service = job_service
         self._all_ofrak_services = all_ofrak_services
-        self._resource_context_factory = ClientResourceContextFactory()
+        self._resource_context_factory = EphemeralResourceContextFactory()
 
     async def create_root_resource(
         self, name: str, data: bytes, tags: Iterable[ResourceTag] = (GenericBinary,)
@@ -99,10 +106,6 @@ class OFRAKContext:
         await asyncio.gather(*(service.shutdown() for service in self._all_ofrak_services))
         logging.shutdown()
 
-    def get_all_tags(self) -> Iterable[ResourceTag]:
-        all_tags = ResourceTag.all_tags
-        return all_tags
-
 
 class OFRAK:
     DEFAULT_LOG_LEVEL = logging.WARNING
@@ -120,7 +123,7 @@ class OFRAK:
         not use any components missing some dependencies
         """
         logging.basicConfig(level=logging_level, format="[%(filename)15s:%(lineno)5s] %(message)s")
-        logging.getLogger().addHandler(logging.FileHandler("/tmp/ofrak.log"))
+        logging.getLogger().addHandler(logging.FileHandler(DEFAULT_OFRAK_LOG_FILE))
         logging.getLogger().setLevel(logging_level)
         logging.captureWarnings(True)
         self.injector = DependencyInjector()
@@ -189,6 +192,7 @@ class OFRAK:
         import ofrak
 
         self.discover(ofrak)
+        self.discover(ofrak_patch_maker)
 
         if self._id_service:
             self.injector.bind_instance(self._id_service)
@@ -204,7 +208,11 @@ class OFRAK:
         components_missing_deps = []
         audited_components = []
         for component in all_discovered_components:
-            if all(dep.is_tool_installed() for dep in component.external_dependencies):
+            if all(
+                await asyncio.gather(
+                    *[dep.is_tool_installed() for dep in component.external_dependencies]
+                )
+            ):
                 audited_components.append(component)
             else:
                 components_missing_deps.append(component)
