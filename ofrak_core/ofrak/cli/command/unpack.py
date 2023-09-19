@@ -144,13 +144,17 @@ class UnpackCommand(OfrakCommandRunsScript):
             child_path = os.path.join(children_dir, filename)
             await self.resource_tree_to_files(child_resource, child_path)
 
-        if resource.get_data_id() is None:
-            return
-        data = await resource.get_data()
-        if len(data) == 0:
-            return
-        with open(path, "wb") as f:
-            f.write(data)
+        if resource.has_tag(FilesystemEntry):
+            entry = await resource.view_as(FilesystemEntry)
+            await entry.flush_to_disk(full_path=path)
+        else:
+            if resource.get_data_id() is None:
+                return
+            data = await resource.get_data()
+            if len(data) == 0:
+                return
+            with open(path, "wb") as f:
+                f.write(data)
         self._resource_paths[resource.get_id()] = path
 
     async def get_filesystem_name(self, resource: Resource) -> str:

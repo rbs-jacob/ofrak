@@ -162,12 +162,16 @@ class FilesystemEntry(ResourceView):
     def is_device(self) -> bool:
         return self.is_block_device() or self.is_character_device()
 
-    async def flush_to_disk(self, root_path: str = ".", filename: Optional[str] = None):
+    async def flush_to_disk(
+        self, root_path: str = ".", filename: Optional[str] = None, full_path: Optional[str] = None
+    ):
         entry_path = await self.get_path()
         if filename is not None:
             entry_path = os.path.join(os.path.dirname(entry_path), filename)
         if self.is_link():
             link_name = os.path.join(root_path, entry_path)
+            if full_path is not None:
+                link_name = full_path
             if not os.path.exists(link_name):
                 link_view = await self.resource.view_as(SymbolicLink)
                 os.symlink(link_view.source_path, link_name)
@@ -189,15 +193,21 @@ class FilesystemEntry(ResourceView):
                     xattr.setxattr(link_name, attr, value, symlink=True)  # Don't follow links
         elif self.is_folder():
             folder_name = os.path.join(root_path, entry_path)
+            if full_path is not None:
+                folder_name = full_path
             if not os.path.exists(folder_name):
                 os.makedirs(folder_name)
         elif self.is_file():
             file_name = os.path.join(root_path, entry_path)
+            if full_path is not None:
+                file_name = full_path
             with open(file_name, "wb") as f:
                 f.write(await self.resource.get_data())
             self.apply_stat_attrs(file_name)
         elif self.is_device():
             device_name = os.path.join(root_path, entry_path)
+            if full_path is not None:
+                device_name = full_path
             if self.stat is None:
                 raise ValueError(
                     f"Cannot create a device {entry_path} for a "
@@ -207,6 +217,8 @@ class FilesystemEntry(ResourceView):
             self.apply_stat_attrs(device_name)
         elif self.is_fifo_pipe():
             fifo_name = os.path.join(root_path, entry_path)
+            if full_path is not None:
+                fifo_name = full_path
             if self.stat is None:
                 raise ValueError(
                     f"Cannot create a fifo {entry_path} for a FIFOPipe resource " "with no stat!"
@@ -463,12 +475,12 @@ class FilesystemRoot(ResourceView):
         ]
         while len(entries) > 0:
             entry = entries.pop(0)
+            await entry.flush_to_disk(root_path=root_path)
             if entry.is_folder():
                 for child in await entry.resource.get_children_as_view(
                     FilesystemEntry, r_filter=ResourceFilter(tags=(FilesystemEntry,))
                 ):
                     entries.append(child)
-            await entry.flush_to_disk(root_path=root_path)
 
         return root_path
 
