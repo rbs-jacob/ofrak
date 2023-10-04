@@ -138,7 +138,8 @@ jobs:
             --rm \
             --entrypoint bash \
             redballoonsecurity/ofrak/ghidra:latest \
-            -c "python -m ofrak_ghidra.server start \
+            -c "python -m pip freeze \
+                && python -m ofrak_ghidra.server start \
                 && make test"
 
   ofrak-angr:
