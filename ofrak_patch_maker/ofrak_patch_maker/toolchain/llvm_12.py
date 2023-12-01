@@ -36,6 +36,10 @@ class LLVM_12_0_1_Toolchain(Toolchain):
             BinFileType.MACH_O,
         ], f"Unsupported file type for {__name__}"
 
+        self._compiler_flags.append("-m32")
+        self._assembler_flags.append("--32")
+        self._linker_flags.extend(["-m", "elf_i386"])
+
         self._preprocessor_flags.append("-E")
 
         self._assembler_flags.append(f"-march={self._assembler_target}")

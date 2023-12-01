@@ -24,6 +24,11 @@ class GNU_X86_64_LINUX_EABI_10_3_0_Toolchain(GNU_10_Toolchain):
             ]
         )
 
+        # TODO: Remove
+        self._compiler_flags.append("-m32")
+        self._assembler_flags.append("--32")
+        self._linker_flags.extend(["-m", "elf_i386"])
+
         if not self._config.hard_float:
             self._compiler_flags.append("-msoft-float")
 
