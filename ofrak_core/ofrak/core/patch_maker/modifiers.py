@@ -3,7 +3,7 @@ import logging
 import os
 import tempfile
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Type, Union, cast
+from typing import Dict, List, Optional, Tuple, Type, Union, cast, Mapping
 
 from ofrak_patch_maker.toolchain.abstract import Toolchain
 from ofrak.component.modifier import Modifier
@@ -94,6 +94,7 @@ class PatchFromSourceModifierConfig(ComponentConfig):
     toolchain: Type[Toolchain]
     header_directories: Tuple[SourceBundle, ...] = ()
     patch_name: Optional[str] = None
+    base_symbols: Mapping[str, int] = None
 
 
 class PatchFromSourceModifier(Modifier):
@@ -124,9 +125,22 @@ class PatchFromSourceModifier(Modifier):
             os.path.join(source_tmp_dir, src_file) for src_file in config.source_patches.keys()
         ]
         program_attributes = await resource.analyze(ProgramAttributes)
+
+        # Automatically extract base symbols from the ELF
+        base_symbols = {
+            cb.name: cb.virtual_address
+            for cb in await resource.get_descendants_as_view(
+                ComplexBlock, r_filter=ResourceFilter.with_tags(ComplexBlock)
+            )
+        }
+        if config.base_symbols is not None:
+            for symbol, address in config.base_symbols.items():
+                base_symbols[symbol] = address
+
         patch_maker = PatchMaker(
             toolchain=config.toolchain(program_attributes, config.toolchain_config),
             build_dir=build_tmp_dir,
+            base_symbols=base_symbols,
         )
 
         patch_bom = patch_maker.make_bom(
@@ -289,6 +303,7 @@ class FunctionReplacementModifierConfig(ComponentConfig):
     toolchain: Type[Toolchain]
     patch_name: Optional[str] = None
     header_directories: Tuple[SourceBundle, ...] = ()
+    base_symbols: Mapping[str, int] = None
 
 
 class FunctionReplacementModifier(Modifier[FunctionReplacementModifierConfig]):
@@ -320,6 +335,7 @@ class FunctionReplacementModifier(Modifier[FunctionReplacementModifierConfig]):
             config.toolchain,
             config.header_directories,
             config.patch_name,
+            config.base_symbols,
         )
         await resource.run(PatchFromSourceModifier, patch_from_source_config)
 
