@@ -218,7 +218,7 @@
         <input
           type="text"
           bind:this="{endInput}"
-          value="{$dataLength && !endInput.value
+          value="{$dataLength && !endInput?.value
             ? `0x${$dataLength.toString(16)}`
             : ''}"
         />
