@@ -140,7 +140,7 @@ class PatchFromSourceModifier(Modifier):
         patch_maker = PatchMaker(
             toolchain=config.toolchain(program_attributes, config.toolchain_config),
             build_dir=build_tmp_dir,
-            base_symbols=base_symbols,
+            base_symbols=base_symbols if base_symbols is not None else None,
         )
 
         patch_bom = patch_maker.make_bom(
