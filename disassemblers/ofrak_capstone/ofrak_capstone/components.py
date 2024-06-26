@@ -1,8 +1,11 @@
 import asyncio
 import logging
+from typing import Union
 
 from ofrak.component.unpacker import UnpackerError
+from ofrak.core import Program, ComplexBlock
 from ofrak.model.viewable_tag_model import AttributesType
+from ofrak_type import NotFoundError
 from ofrak_type.architecture import InstructionSetMode
 from ofrak.core.addressable import Addressable
 from ofrak.core.architecture import ProgramAttributes
@@ -20,7 +23,11 @@ from ofrak.service.disassembler.disassembler_service_i import (
     DisassemblerServiceInterface,
     DisassemblerServiceRequest,
 )
-from ofrak.service.resource_service_i import ResourceServiceInterface
+from ofrak.service.resource_service_i import (
+    ResourceServiceInterface,
+    ResourceFilter,
+    ResourceAttributeValueFilter,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,12 +64,21 @@ class CapstoneBasicBlockUnpacker(BasicBlockUnpacker):
         instruction_children_created = []
 
         for disassem_result in await self._disassembler_service.disassemble(disassemble_request):
+            operands = " ".join(
+                await asyncio.gather(
+                    *(
+                        get_function_from_address(o, resource)
+                        for o in disassem_result.operands.split(" ")
+                    )
+                )
+            )
+
             instruction_view = Instruction(
                 disassem_result.address,
                 disassem_result.size,
-                f"{disassem_result.mnemonic} {disassem_result.operands}",
+                f"{disassem_result.mnemonic} {operands}",
                 disassem_result.mnemonic,
-                disassem_result.operands,
+                operands,
                 bb_view.mode,
             )
 
@@ -122,14 +138,44 @@ class CapstoneInstructionAnalyzer(InstructionAnalyzer):
                 f"from bytes {instruction_data.hex()}"
             )
 
+        operands = " ".join(
+            await get_function_from_address(o, resource)
+            for o in disassem_result.operands.split(" ")
+        )
+
         return Instruction(
             disassem_result.address,
             disassem_result.size,
-            f"{disassem_result.mnemonic} {disassem_result.operands}",
+            f"{disassem_result.mnemonic} {operands}",
             disassem_result.mnemonic,
-            disassem_result.operands,
+            operands,
             mode,
         )
+
+
+async def get_function_from_address(address: Union[int, str], resource: Resource) -> str:
+    try:
+        address = int(address, 16 if address.startswith("0x") else 10)
+    except ValueError:
+        return address
+    # TODO: Should use get_ancestor_as_view -- may not be the only ancestor
+    #  if in (for example) an ELF within an ELF as in a vmlinux file
+    program = await resource.get_only_ancestor_as_view(
+        Program, r_filter=ResourceFilter.with_tags(Program)
+    )
+    try:
+        function = await program.resource.get_only_descendant_as_view(
+            ComplexBlock,
+            r_filter=ResourceFilter(
+                tags=(ComplexBlock,),
+                attribute_filters=(
+                    ResourceAttributeValueFilter(ComplexBlock.VirtualAddress, address),
+                ),
+            ),
+        )
+        return function.name
+    except NotFoundError:
+        return hex(address)
 
 
 class CapstoneInstructionRegisterUsageAnalyzer(InstructionRegisterUsageAnalyzer):
