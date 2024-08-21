@@ -3,7 +3,6 @@ from typing import Optional
 
 from ofrak.component.abstract import AbstractComponent
 from ofrak.model.component_model import CC
-from ofrak.resource import Resource
 
 
 class ModifierError(RuntimeError):
@@ -17,7 +16,7 @@ class Modifier(AbstractComponent[CC], ABC):
     """
 
     @abstractmethod
-    async def modify(self, resource: Resource, config: CC) -> None:
+    async def modify(self, resource, config: CC) -> None:
         """
         Modify the given resource.
 
@@ -36,5 +35,5 @@ class Modifier(AbstractComponent[CC], ABC):
     def get_default_config(cls) -> Optional[CC]:
         return cls._get_default_config_from_method(cls.modify)
 
-    async def _run(self, resource: Resource, config: CC) -> None:
+    async def _run(self, resource, config: CC) -> None:
         await self.modify(resource, config)

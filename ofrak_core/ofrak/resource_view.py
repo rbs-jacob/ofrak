@@ -4,8 +4,6 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, Type, TypeVar, Dict, Iterable, Any, cast, Set
 
-from ofrak.resource import Resource
-
 from ofrak.model.resource_model import ResourceAttributes, ResourceModel
 from ofrak.model.tag_model import ResourceTag
 from ofrak.model.viewable_tag_model import ResourceViewInterface
@@ -39,7 +37,7 @@ class ResourceView(ResourceViewInterface):
     view should be created by calling `resource.view_as(...)` again.
     """
 
-    _resource: Optional[Resource] = dataclasses.field(
+    _resource: Optional["Resource"] = dataclasses.field(
         default=None, init=False, repr=False, compare=False
     )
     _deleted: bool = dataclasses.field(default=False, init=False, repr=False, compare=False)
@@ -53,7 +51,7 @@ class ResourceView(ResourceViewInterface):
         return str(cls.__name__)
 
     @property
-    def resource(self) -> Resource:
+    def resource(self):
         """
         Getter to access the underlying resource.
 
@@ -71,7 +69,7 @@ class ResourceView(ResourceViewInterface):
         return self._resource
 
     @resource.setter
-    def resource(self, res: Resource):
+    def resource(self, res):
         """
         Setter to create the underlying resource.
 

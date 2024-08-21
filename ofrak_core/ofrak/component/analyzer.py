@@ -2,8 +2,6 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Type, Tuple, Generic, TypeVar, Union, cast, Iterable, Optional
 
-from ofrak.resource import Resource
-
 from ofrak.component.abstract import AbstractComponent
 from ofrak.model.component_model import CC
 from ofrak.model.resource_model import ResourceAttributes
@@ -41,7 +39,7 @@ class Analyzer(AbstractComponent, Generic[CC, AnalyzerReturnType], ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    async def analyze(self, resource: Resource, config: CC) -> AnalyzerReturnType:
+    async def analyze(self, resource, config: CC) -> AnalyzerReturnType:
         """
         Analyze a resource for to extract specific
         [ResourceAttributes][ofrak.model.resource_model.ResourceAttributes].
@@ -105,7 +103,7 @@ class Analyzer(AbstractComponent, Generic[CC, AnalyzerReturnType], ABC):
     def get_default_config(cls) -> Optional[CC]:
         return cls._get_default_config_from_method(cls.analyze)
 
-    async def _run(self, resource: Resource, config: CC):
+    async def _run(self, resource, config: CC):
         if resource.has_component_run(self.get_id(), self.get_version()):
             return self._log_component_has_run_warning(resource)
         if resource.has_component_run(self.get_id()):

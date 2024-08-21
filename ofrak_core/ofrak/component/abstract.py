@@ -8,8 +8,6 @@ from typing import (
     Iterable,
     List,
     Optional,
-    Callable,
-    Any,
     cast,
     Tuple,
 )
@@ -31,10 +29,7 @@ from ofrak.model.resource_model import (
     MutableResourceModel,
 )
 from ofrak.model.viewable_tag_model import ResourceViewContext
-from ofrak.resource import Resource, ResourceFactory, save_resources
-from ofrak.service.data_service_i import DataServiceInterface
 from ofrak.service.dependency_handler import DependencyHandlerFactory
-from ofrak.service.resource_service_i import ResourceServiceInterface
 from ofrak_type.error import NotFoundError
 
 LOGGER = logging.getLogger(__name__)
@@ -43,13 +38,9 @@ LOGGER = logging.getLogger(__name__)
 class AbstractComponent(ComponentInterface[CC], ABC):
     def __init__(
         self,
-        resource_factory: ResourceFactory,
-        data_service: DataServiceInterface,
-        resource_service: ResourceServiceInterface,
+        *args,
+        **kwargs,
     ):
-        self._resource_factory = resource_factory
-        self._data_service = data_service
-        self._resource_service = resource_service
         self._dependency_handler_factory = DependencyHandlerFactory()
         self._default_config = self.get_default_config()
 
@@ -179,7 +170,7 @@ class AbstractComponent(ComponentInterface[CC], ABC):
         return component_result
 
     @abstractmethod
-    async def _run(self, resource: Resource, config: CC):
+    async def _run(self, resource, config: CC):
         raise NotImplementedError()
 
     async def _save_resources(
@@ -199,19 +190,9 @@ class AbstractComponent(ComponentInterface[CC], ABC):
             component_context,
             job_context,
         )
-        await save_resources(
-            resources,
-            self._resource_service,
-            self._data_service,
-            component_context,
-            resource_context,
-            resource_view_context,
-        )
 
     @staticmethod
-    def _get_default_config_from_method(
-        component_method: Callable[[Any, Resource, CC], Any]
-    ) -> Optional[CC]:
+    def _get_default_config_from_method(component_method) -> Optional[CC]:
         run_signature = inspect.signature(component_method)
         config_arg_type = run_signature.parameters["config"]
         default_arg: CC = config_arg_type.default
@@ -249,7 +230,7 @@ class AbstractComponent(ComponentInterface[CC], ABC):
     def get_version(self) -> int:
         return 1
 
-    def _log_component_has_run_warning(self, resource: Resource):
+    def _log_component_has_run_warning(self, resource):
         LOGGER.warning(
             f"{self.get_id().decode()} has already been run on resource {resource.get_id().hex()}"
         )

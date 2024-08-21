@@ -14,12 +14,6 @@ from ofrak.model.component_filters import (
 )
 from ofrak.model.component_model import CC
 from ofrak.model.tag_model import ResourceTag
-from ofrak.resource import Resource, ResourceFactory
-from ofrak.service.component_locator_i import (
-    ComponentLocatorInterface,
-)
-from ofrak.service.data_service_i import DataServiceInterface
-from ofrak.service.resource_service_i import ResourceServiceInterface
 
 
 class UnpackerError(RuntimeError):
@@ -31,16 +25,6 @@ class Unpacker(AbstractComponent[CC], ABC):
     Unpackers are components that unpack resources, splitting them into one or more children.
     """
 
-    def __init__(
-        self,
-        resource_factory: ResourceFactory,
-        data_service: DataServiceInterface,
-        resource_service: ResourceServiceInterface,
-        component_locator: ComponentLocatorInterface,
-    ):
-        super().__init__(resource_factory, data_service, resource_service)
-        self._component_locator = component_locator
-
     @property
     @abstractmethod
     def children(self) -> Tuple[Optional[ResourceTag], ...]:
@@ -51,7 +35,7 @@ class Unpacker(AbstractComponent[CC], ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    async def unpack(self, resource: Resource, config: CC) -> None:
+    async def unpack(self, resource, config: CC) -> None:
         """
         Unpack the given resource.
 
@@ -71,7 +55,7 @@ class Unpacker(AbstractComponent[CC], ABC):
     def get_default_config(cls) -> Optional[CC]:
         return cls._get_default_config_from_method(cls.unpack)
 
-    async def _run(self, resource: Resource, config: CC):
+    async def _run(self, resource, config: CC):
         if resource.has_component_run(self.get_id(), self.get_version()):
             return self._log_component_has_run_warning(resource)
         if resource.has_component_run(self.get_id()):
@@ -89,7 +73,7 @@ class Unpacker(AbstractComponent[CC], ABC):
         for packer_id in packer_ids:
             resource.remove_component(packer_id)
 
-    def _get_which_packers_ran(self, resource: Resource) -> Tuple[bytes, ...]:
+    def _get_which_packers_ran(self, resource) -> Tuple[bytes, ...]:
         unpackers_ran = self._component_locator.get_components_matching_filter(
             ComponentAndMetaFilter(
                 ComponentWhitelistFilter(*resource.get_model().component_versions.keys()),
@@ -106,7 +90,7 @@ class Unpacker(AbstractComponent[CC], ABC):
         )
         return tuple(unpacker.get_id() for unpacker in unpackers_ran)
 
-    def _validate_unpacked_children(self, resource: Resource) -> None:
+    def _validate_unpacked_children(self, resource) -> None:
         """
         Validate that the unpacked resources match the type defined by
         [Unpacker.children][ofrak.component.unpacker.Unpacker.children].
