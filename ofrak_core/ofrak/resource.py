@@ -241,7 +241,9 @@ class Resource:
         analyzers = [
             component
             for component in self.components
-            if isinstance(component, Analyzer) and resource_attributes in component.outputs
+            if isinstance(component, Analyzer)
+            and self.tags & set(component.targets)
+            and resource_attributes in component.outputs
         ]
         if resource_attributes and analyzers:
             await asyncio.gather(*(self.run(component, None) for component in analyzers))
