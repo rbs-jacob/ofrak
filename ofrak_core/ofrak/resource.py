@@ -198,14 +198,10 @@ class Resource:
         elif isinstance(c, Unpacker):
             return await c.unpack(self, config)
         elif isinstance(c, Analyzer):
-            attrs = await c.analyze(self, config)
-            # try:
-            #     for t in cast(ViewableResourceTag, attrs.__class__).composed_attributes_types:
-            #         self.attributes[t] = attrs
-            # except:
-            #     pass
-            self.attributes[attrs.__class__] = attrs
-            return attrs
+            result = await c.analyze(self, config)
+            for attrs in c.get_attributes_from_results(result):
+                self.add_attributes(attrs)
+            return result
         elif isinstance(c, Modifier):
             return await c.modify(self, config)
         elif isinstance(c, Packer):
@@ -237,16 +233,16 @@ class Resource:
 
         :return:
         """
-        if resource_attributes:
-            await asyncio.gather(
-                *(
-                    self.run(component, None)
-                    for component in self.components
-                    if isinstance(component, Analyzer) and resource_attributes in component.outputs
-                )
-            )
+        analyzers = [
+            component
+            for component in self.components
+            if isinstance(component, Analyzer) and resource_attributes in component.outputs
+        ]
+        if resource_attributes and analyzers:
+            await asyncio.gather(*(self.run(component, None) for component in analyzers))
             return self.attributes[resource_attributes]
-        await self._auto_run_components(Analyzer)
+        elif not resource_attributes:
+            await self._auto_run_components(Analyzer)
 
     async def identify(self):
         """
@@ -359,7 +355,12 @@ class Resource:
             )
         if data_range is not None:
             data = self.data[data_range.start : data_range.end]
-        result = Resource(data=data, parent=self, tags=tags, attributes=attributes)
+        result = Resource(
+            data=data,
+            parent=self,
+            tags=tags,
+            attributes={type(attr): attr for attr in (attributes or ())},
+        )
         self.children.append(result)
         return result
 
@@ -426,7 +427,7 @@ class Resource:
         :return:
         """
         if viewable_tag not in self.attributes:
-            await self.analyze()
+            await self.analyze(viewable_tag)
         result = viewable_tag.create(self)
         result.resource = self
         return result
@@ -492,7 +493,7 @@ class Resource:
         provided attributes classes, they are replaced with the provided one.
         """
         for attrs in attributes:
-            self.attributes[attrs.__class__] = attrs
+            self.attributes[type(attrs)] = attrs
 
     def has_attributes(self, attributes_type: Type[ResourceAttributes]) -> bool:
         """
