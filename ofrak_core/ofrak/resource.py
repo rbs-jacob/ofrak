@@ -33,6 +33,10 @@ from ofrak.model.viewable_tag_model import (
 from ofrak.service.resource_service_i import (
     ResourceFilter,
     ResourceSort,
+    ResourceFilterCondition,
+    ResourceAttributeRangeFilter,
+    ResourceAttributeValueFilter,
+    ResourceAttributeValuesFilter,
 )
 from ofrak_type.range import Range
 
@@ -657,8 +661,43 @@ class Resource:
         if max_depth == 0:
             return []
         result = []
+        if r_filter and r_filter.include_self:
+            result.append(self)
+            r_filter.include_self = False
         for child in self.children:
-            result.append(child)
+            passed_tag_filter = True
+            if r_filter and r_filter.tags:
+                if r_filter.tags_condition == ResourceFilterCondition.AND and not all(
+                    child.has_tag(t) for t in r_filter.tags
+                ):
+                    passed_tag_filter = False
+                elif r_filter.tags_condition == ResourceFilterCondition.OR and not any(
+                    child.has_tag(t) for t in r_filter.tags
+                ):
+                    passed_tag_filter = False
+            passed_attribute_filters = True
+            if r_filter and r_filter.attribute_filters:
+                for attribute_filter in r_filter.attribute_filters:
+                    value = attribute_filter.attribute.get_value(child)
+                    if isinstance(attribute_filter, ResourceAttributeRangeFilter) and (
+                        value < attribute_filter.min or value >= attribute_filter.max
+                    ):
+                        passed_attribute_filters = False
+                        break
+                    elif (
+                        isinstance(attribute_filter, ResourceAttributeValueFilter)
+                        and value != attribute_filter.value
+                    ):
+                        passed_attribute_filters = False
+                        break
+                    elif (
+                        isinstance(attribute_filter, ResourceAttributeValuesFilter)
+                        and value not in attribute_filter.values
+                    ):
+                        passed_attribute_filters = False
+                        break
+            if passed_tag_filter and passed_attribute_filters:
+                result.append(child)
             result.extend(
                 await child.get_descendants(
                     max_depth=max_depth - 1, r_filter=r_filter, r_sort=r_sort
