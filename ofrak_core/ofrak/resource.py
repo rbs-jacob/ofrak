@@ -203,6 +203,7 @@ class Resource:
             return await c.unpack(self, config)
         elif isinstance(c, Analyzer):
             result = await c.analyze(self, config)
+            self.add_attributes(result)
             for attrs in c.get_attributes_from_results(result):
                 self.add_attributes(attrs)
             return result
@@ -574,9 +575,11 @@ class Resource:
         """
         result = []
         parent = self.parent
+        if r_filter and r_filter.include_self:
+            result.append(self)
         while parent is not None:
-            # TODO: add filtering
-            result.append(parent)
+            if run_attribute_filter(r_filter, parent):
+                result.append(parent)
             parent = parent.parent
         return result
 
@@ -607,7 +610,7 @@ class Resource:
         any tags it must have and/or values of indexable attributes
         :return:
         """
-        return self.parent
+        return list(await self.get_ancestors(r_filter=r_filter))[0]
 
     async def get_descendants_as_view(
         self,
@@ -657,7 +660,7 @@ class Resource:
 
         :raises NotFoundError: If a filter was provided and no resources match the provided filter
         """
-        # TODO: Handle max depth, filtering, and sorting
+        # TODO: Handle sorting
         if max_depth == 0:
             return []
         result = []
@@ -665,38 +668,7 @@ class Resource:
             result.append(self)
             r_filter.include_self = False
         for child in self.children:
-            passed_tag_filter = True
-            if r_filter and r_filter.tags:
-                if r_filter.tags_condition == ResourceFilterCondition.AND and not all(
-                    child.has_tag(t) for t in r_filter.tags
-                ):
-                    passed_tag_filter = False
-                elif r_filter.tags_condition == ResourceFilterCondition.OR and not any(
-                    child.has_tag(t) for t in r_filter.tags
-                ):
-                    passed_tag_filter = False
-            passed_attribute_filters = True
-            if r_filter and r_filter.attribute_filters:
-                for attribute_filter in r_filter.attribute_filters:
-                    value = attribute_filter.attribute.get_value(child)
-                    if isinstance(attribute_filter, ResourceAttributeRangeFilter) and (
-                        value < attribute_filter.min or value >= attribute_filter.max
-                    ):
-                        passed_attribute_filters = False
-                        break
-                    elif (
-                        isinstance(attribute_filter, ResourceAttributeValueFilter)
-                        and value != attribute_filter.value
-                    ):
-                        passed_attribute_filters = False
-                        break
-                    elif (
-                        isinstance(attribute_filter, ResourceAttributeValuesFilter)
-                        and value not in attribute_filter.values
-                    ):
-                        passed_attribute_filters = False
-                        break
-            if passed_tag_filter and passed_attribute_filters:
+            if run_attribute_filter(r_filter, child):
                 result.append(child)
             result.extend(
                 await child.get_descendants(
@@ -1016,3 +988,40 @@ async def _default_summarize_resource(resource: Resource) -> str:
 class ResourceFactory:
     def __init__(self, *args, **kwargs):
         pass
+
+
+def run_attribute_filter(r_filter, resource):
+    passed_tag_filter = True
+    if r_filter and r_filter.tags:
+        if r_filter.tags_condition == ResourceFilterCondition.AND and not all(
+            resource.has_tag(t) for t in r_filter.tags
+        ):
+            passed_tag_filter = False
+        elif r_filter.tags_condition == ResourceFilterCondition.OR and not any(
+            resource.has_tag(t) for t in r_filter.tags
+        ):
+            passed_tag_filter = False
+    if not passed_tag_filter:
+        return False
+    passed_attribute_filters = True
+    if r_filter and r_filter.attribute_filters:
+        for attribute_filter in r_filter.attribute_filters:
+            value = attribute_filter.attribute.get_value(resource)
+            if isinstance(attribute_filter, ResourceAttributeRangeFilter) and (
+                value < attribute_filter.min or value >= attribute_filter.max
+            ):
+                passed_attribute_filters = False
+                break
+            elif (
+                isinstance(attribute_filter, ResourceAttributeValueFilter)
+                and value != attribute_filter.value
+            ):
+                passed_attribute_filters = False
+                break
+            elif (
+                isinstance(attribute_filter, ResourceAttributeValuesFilter)
+                and value not in attribute_filter.values
+            ):
+                passed_attribute_filters = False
+                break
+    return passed_tag_filter and passed_attribute_filters
