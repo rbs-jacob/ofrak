@@ -144,7 +144,7 @@ class UnpackCommand(OfrakCommandRunsScript):
             child_path = os.path.join(children_dir, filename)
             await self.resource_tree_to_files(child_resource, child_path)
 
-        if resource.get_data_id() is None:
+        if resource.data is None:
             return
         data = await resource.get_data()
         if len(data) == 0:
@@ -160,7 +160,7 @@ class UnpackCommand(OfrakCommandRunsScript):
         else:
             filename = resource.get_caption()
 
-        parent_id = resource.get_model().parent_id
+        parent_id = (await resource.get_parent()).get_id()
         filesystem_name_key = (parent_id, filename)
         if filesystem_name_key in self._filename_trackers:
             name_suffixes = self._filename_trackers[filesystem_name_key]
@@ -182,12 +182,12 @@ class UnpackCommand(OfrakCommandRunsScript):
 
 
 async def _custom_summarize_resource(resource: Resource, unpack_cmd: UnpackCommand) -> str:
-    attributes_info = ", ".join(attrs_type.__name__ for attrs_type in resource._resource.attributes)
+    attributes_info = ", ".join(attrs_type.__name__ for attrs_type in resource.attributes)
     name = await unpack_cmd.get_filesystem_name(resource)
     if " " in name:
         name = f"'{name}'"
 
-    if resource._resource.data_id:
+    if resource.data:
         data_info = f", size={await resource.get_data_length()} bytes"
     else:
         data_info = ", no data"

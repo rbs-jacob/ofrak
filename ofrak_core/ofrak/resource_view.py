@@ -2,7 +2,7 @@ import dataclasses
 import functools
 import logging
 from dataclasses import dataclass
-from typing import Optional, Type, TypeVar, Dict, Iterable, Any, cast, Set
+from typing import Any, Dict, Iterable, Set, Type, TypeVar, cast
 
 from ofrak.model.resource_model import ResourceAttributes, ResourceModel
 from ofrak.model.tag_model import ResourceTag
@@ -37,9 +37,7 @@ class ResourceView(ResourceViewInterface):
     view should be created by calling `resource.view_as(...)` again.
     """
 
-    _resource: Optional["Resource"] = dataclasses.field(
-        default=None, init=False, repr=False, compare=False
-    )
+    _resource: Any = dataclasses.field(default=None, init=False, repr=False, compare=False)
     _deleted: bool = dataclasses.field(default=False, init=False, repr=False, compare=False)
 
     @classmethod

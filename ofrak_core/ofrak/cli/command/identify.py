@@ -73,7 +73,7 @@ class IdentifyCommand(OfrakCommandRunsScript):
             output += f"  {tag}\n"
 
         output += "= Attributes =\n"
-        for attributes_t, attribute in resource.get_model().attributes.items():
+        for attributes_t, attribute in resource.attributes.items():
             if attributes_t is Magic:
                 output += (
                     f"  Magic: "

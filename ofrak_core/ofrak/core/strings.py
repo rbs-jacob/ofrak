@@ -134,8 +134,6 @@ class StringsUnpacker(Unpacker[None]):
     SHORT_STRING_PATTERN = re.compile(b"([ -~\n\t\r]{2,})\x00")
 
     async def unpack(self, resource: Resource, config: None) -> None:
-        if resource.get_data_id() is None:
-            return
         if resource.has_tag(CodeRegion):
             # code is less likely to have strings so more likely to have false positives
             pattern = self.LONG_STRING_PATTERN

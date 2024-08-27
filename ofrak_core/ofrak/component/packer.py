@@ -3,17 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Tuple
 
 from ofrak.component.abstract import AbstractComponent
-from ofrak.component.analyzer import Analyzer
-from ofrak.component.identifier import Identifier
-from ofrak.component.modifier import Modifier
 from ofrak.model.component_model import CC
-from ofrak.model.component_filters import (
-    ComponentWhitelistFilter,
-    ComponentTypeFilter,
-    ComponentOrMetaFilter,
-    ComponentAndMetaFilter,
-    ComponentNotMetaFilter,
-)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -67,18 +57,4 @@ class Packer(AbstractComponent[CC], ABC):
             await child_r.delete()
 
     def _get_which_unpackers_ran(self, resource) -> Tuple[bytes, ...]:
-        unpackers_ran = self._component_locator.get_components_matching_filter(
-            ComponentAndMetaFilter(
-                ComponentWhitelistFilter(*resource.get_model().component_versions.keys()),
-                # Use process of elimination to avoid circular import between unpacker.py, packer.py
-                ComponentNotMetaFilter(
-                    ComponentOrMetaFilter(
-                        ComponentTypeFilter(Packer),  # type: ignore
-                        ComponentTypeFilter(Analyzer),  # type: ignore
-                        ComponentTypeFilter(Identifier),  # type: ignore
-                        ComponentTypeFilter(Modifier),  # type: ignore
-                    )
-                ),
-            )
-        )
-        return tuple(unpacker.get_id() for unpacker in unpackers_ran)
+        raise NotImplementedError()

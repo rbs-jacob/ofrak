@@ -67,7 +67,7 @@ class Resource:
         self.tags = set(tags) if tags else set()
         self.attributes = attributes or dict()
         self.data = data or b""
-        self.children = []
+        self.children: List["Resource"] = []
 
         self._is_modified = False
 
@@ -559,6 +559,8 @@ class Resource:
         """
         Get the parent of this resource.
         """
+        if self.parent is None:
+            raise RuntimeError("Parent is None")
         return self.parent
 
     async def get_ancestors(
@@ -763,7 +765,7 @@ class Resource:
         """
         return next(
             sibling
-            for sibling in await self.parent.get_children(r_filter=r_filter)
+            for sibling in await (await self.get_parent()).get_children(r_filter=r_filter)
             if sibling != self
         )
 
