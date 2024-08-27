@@ -38,6 +38,7 @@ from ofrak.service.resource_service_i import (
     ResourceAttributeValueFilter,
     ResourceAttributeValuesFilter,
 )
+from ofrak_type import NotFoundError
 from ofrak_type.range import Range
 
 LOGGER = logging.getLogger(__name__)
@@ -228,7 +229,7 @@ class Resource:
         :return: A ComponentRunResult containing information on resources affected by the component
         """
         await self._auto_run_components(Identifier)
-        return await self._auto_run_components(Unpacker)
+        await self._auto_run_components(Unpacker)
 
     async def analyze(self, resource_attributes: Optional[Type[RA]] = None):
         """
@@ -238,11 +239,14 @@ class Resource:
 
         :return:
         """
+        if resource_attributes in self.attributes:
+            return self.attributes[resource_attributes]
         analyzers = [
             component
             for component in self.components
             if isinstance(component, Analyzer)
             and self.tags & set(component.targets)
+            and resource_attributes is not None
             and resource_attributes in component.outputs
         ]
         if resource_attributes and analyzers:
@@ -255,7 +259,7 @@ class Resource:
         """
         Run all registered identifiers on the resource, tagging it with matching resource tags.
         """
-        return await self._auto_run_components(Identifier)
+        await self._auto_run_components(Identifier)
 
     async def pack(self):
         """
@@ -517,6 +521,8 @@ class Resource:
         :param attributes_type:
         :return:
         """
+        if attributes_type not in self.attributes:
+            raise NotFoundError()
         return self.attributes[attributes_type]
 
     def remove_attributes(self, attributes_type: Type[ResourceAttributes]):
