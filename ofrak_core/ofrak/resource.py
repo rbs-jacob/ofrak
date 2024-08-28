@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import itertools
 import logging
 import uuid
 from typing import (
@@ -462,7 +463,10 @@ class Resource:
         are also added.
         """
         for tag in tags:
-            self.tags.add(tag)
+            # The last three are Resource, ResourceInterface, and object
+            for cls in type.mro(tag)[:-3]:
+                assert isinstance(cls, ResourceTag)
+                self.tags.add(cls)
 
     def get_tags(self, inherit: bool = True) -> Iterable[ResourceTag]:
         """
@@ -685,7 +689,7 @@ class Resource:
                     max_depth=max_depth - 1, r_filter=r_filter, r_sort=r_sort
                 )
             )
-        return result
+        return itertools.islice(result, None)
 
     async def get_only_descendant_as_view(
         self,
