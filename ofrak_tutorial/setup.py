@@ -31,7 +31,7 @@ def read_requirements(requirements_path):
 
 setuptools.setup(
     name="ofrak_tutorial",
-    version="0.1.0",
+    version="0.1.1",
     author="Red Balloon Security",
     author_email="ofrak@redballoonsecurity.com",
     description="OFRAK tutorial",
@@ -43,6 +43,6 @@ setuptools.setup(
     extras_require={
         "test": read_requirements("requirements-test.txt"),
     },
-    python_requires=">=3.7",
+    python_requires=">=3.9",
     license=license,
 )

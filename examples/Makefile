@@ -1,5 +1,4 @@
 PYTHON=python3
-PIP=pip3
 
 .PHONY: install
 install:
@@ -9,7 +8,8 @@ develop:
 
 .PHONY: test
 test:
-	$(PYTHON) -m pytest test_examples.py
+	$(PYTHON) -m pytest --cov=. --cov-report=term-missing test_examples.py
+	fun-coverage --cov-fail-under=100
 
 .PHONY: dependencies
 dependencies:

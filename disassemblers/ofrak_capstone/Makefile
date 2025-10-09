@@ -1,13 +1,12 @@
 PYTHON=python3
-PIP=pip3
 
 .PHONY: install
 install:
-	$(PIP) install .
+	$(PYTHON) -m pip install --pre .
 
 .PHONY: develop
 develop:
-	$(PIP) install -e .[test]
+	$(PYTHON) -m pip install --pre -e . --config-settings editable_mode=compat
 
 .PHONY: inspect
 inspect:
@@ -15,5 +14,5 @@ inspect:
 
 .PHONY: test
 test: inspect
-	$(PYTHON) -m pytest ofrak_capstone_test --cov=ofrak_capstone --cov-report=term-missing
+	$(PYTHON) -m pytest tests --cov=ofrak_capstone --cov-report=term-missing
 	fun-coverage --cov-fail-under=100

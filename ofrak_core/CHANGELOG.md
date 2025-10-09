@@ -3,18 +3,27 @@ All notable changes to `ofrak` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/redballoonsecurity/ofrak/tree/master)
+## [3.3.0](https://github.com/redballoonsecurity/ofrak/compare/ofrak-v3.2.0...ofrak-v3.3.0) - 2025-10-03
+
 ### Added
 - Add license check command to prompt users about community or pro licenses. ([#478](https://github.com/redballoonsecurity/ofrak/pull/478))
 - Support `application/vnd.android.package-archive` mime type for APKs, which is returned by newer versions of libmagic ([#470](https://github.com/redballoonsecurity/ofrak/pull/470))
 - Add links to other resources and locations in comments with an autocomplete feature in the comment view. ([#447](https://github.com/redballoonsecurity/ofrak/pull/447)) 
 - Add modifier to add and remove sections using lief. ([#443](https://github.com/redballoonsecurity/ofrak/pull/443))
-- Add tabbed content views and a decompilation view to the OFRAK GUI. ([#436](https://github.com/redballoonsecurity/ofrak/pull/436/))
+- Add tabbed content views and a decompilation view to the OFRAK GUI. ([#436](https://github.com/redballoonsecurity/ofrak/pull/436/), [#600](https://github.com/redballoonsecurity/ofrak/pull/600))
 - Refactor HexView and related components to use mousewheel instead of scroll and compartmentalize all comonents to src/hex. ([#427](https://github.com/redballoonsecurity/ofrak/pull/427))
 - Add an improved ISO9660 packer that leverages `mkisofs` instead of PyCdLib. ([#393](https://github.com/redballoonsecurity/ofrak/pull/393))
 - Add UEFI binary unpacker. ([#399](https://github.com/redballoonsecurity/ofrak/pull/399))
 - Add recursive identify functionality in the GUI. ([#435](https://github.com/redballoonsecurity/ofrak/pull/435))
 - Add generic DecompilationAnalysis classes. ([#453](https://github.com/redballoonsecurity/ofrak/pull/453))
+- `PatchFromSourceModifier` bundles src and header files into same temporary directory with BOM and FEM ([#517](https://github.com/redballoonsecurity/ofrak/pull/517))
+- Add support for running on Windows to the `Filesystem` component. ([#521](https://github.com/redballoonsecurity/ofrak/pull/521))
+- Add PyGhidra support along with a disassembly backend to pull disassembler analysis from a json. ([#556](https://github.com/redballoonsecurity/ofrak/pull/556))
+- Add `JavaArchive` resource tag ([#492](https://github.com/redballoonsecurity/ofrak/pull/492))
+- Add new method for allocating `.bss` sections using free space ranges that aren't mapped to data ranges. ([#505](https://github.com/redballoonsecurity/ofrak/pull/505), [#569](https://github.com/redballoonsecurity/ofrak/pull/569))
+- Pulled `Allocatable._align_range` out to standalone function `allocate_range_start` ([#575](https://github.com/redballoonsecurity/ofrak/pull/575))
+- `ComponentExternalTool` now supports chocolatey packages (apk, cpio, pigz, 7zip) ([#613](https://github.com/redballoonsecurity/ofrak/pull/613))
+- Add endpoints to the OFRAK GUI backend to support OFRAK MCP. ([#634](https://github.com/redballoonsecurity/ofrak/pull/634))
 
 ### Fixed
 - Improved flushing of filesystem entries (including symbolic links and other types) to disk. ([#373](https://github.com/redballoonsecurity/ofrak/pull/373))
@@ -28,8 +37,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - Fix bug in OFRAK GUI server which causes an error when parsing a default config value of bytes. ([#409](https://github.com/redballoonsecurity/ofrak/pull/409))
 - Set default fallback font to system default monospace, instead of variable-width sans-serif. ([#422](https://github.com/redballoonsecurity/ofrak/pull/422))
 - View resource attribute string values containing only digits primarily as strings, alternatively as hex numbers. ([#423](https://github.com/redballoonsecurity/ofrak/pull/423))
+- Fix bug where PJSON deserializer fails to deserialze `ComponentConfig` dataclasses have a field with a default value of `None`. ([#506](https://github.com/redballoonsecurity/ofrak/pull/506))
+- Fix bug where calling `Resource.remove_tag` on both a tag class and a class that inherits from that class causes a `KeyError` on resource save. ([#510](https://github.com/redballoonsecurity/ofrak/pull/510))
+- Use PyPI version of `bincopy`, upgrade to version 20.0.0 ([#528](https://github.com/redballoonsecurity/ofrak/pull/528))
+- Fix bugs on Windows arising from using `os.path` methods when only forward-slashes are acceptable ([#521](https://github.com/redballoonsecurity/ofrak/pull/521))
+- Made some changes to OFRAK test suite to improve test coverage on Windows ([#487](https://github.com/redballoonsecurity/ofrak/pull/487))
+- Fix usage of `NamedTemporaryFile` with external tools on Windows ([#486](https://github.com/redballoonsecurity/ofrak/pull/486))
+- Fixed endianness issue in DTB raw byte identifier ([#492](https://github.com/redballoonsecurity/ofrak/pull/492))
+- Fix unintentional ignoring of cpio errors introduced in [#486](https://github.com/redballoonsecurity/ofrak/pull/486) ([#555](https://github.com/redballoonsecurity/ofrak/pull/555]))
+- `Data` resource attribute always corresponds to value of `Resource.get_data_range_within_root` ([#559](https://github.com/redballoonsecurity/ofrak/pull/559))
+- Fixed endianness issue in DTB raw byte identifier ([#492](https://github.com/redballoonsecurity/ofrak/pull/492))
+- Fixed bugs with PJSON serialization for some component configs in the front end ([#437](https://github.com/redballoonsecurity/ofrak/pull/437))
+- Make `ofrak[test]` dependencies on `ofrak-capstone` and `ofrak-angr` optional to avoid circular-dependency issues ([#571](https://github.com/redballoonsecurity/ofrak/pull/571))
+- Fix broken link in docs ([#574](https://github.com/redballoonsecurity/ofrak/pull/574))
+- Fix ValueError after analyzing ELF with invalid MemoryPermissions ([#581](https://github.com/redballoonsecurity/ofrak/pull/581))
+- Fix build pipeline failures by pinning `orjson`, a recent minor version of which breaks the PJSON tests. ([#584](https://github.com/redballoonsecurity/ofrak/pull/584))
+- Improve performance of ResourceAttributes.get_indexable_attributes() ([#586](https://github.com/redballoonsecurity/ofrak/pull/586))
+- Correct docstrings in the `resource.py` file to accurately reflect when an error is raised
+- Remove `Data` attribute to eliminate duplicative indexing in `ResourceService`, resulting in performance improvement for all workflows ([#589](https://github.com/redballoonsecurity/ofrak/pull/589))
+- Minimap view now updates upon refresh when data changes ([#598](https://github.com/redballoonsecurity/ofrak/pull/598))
+- Ensure files loaded in OFRAK GUI display filename ([#599](https://github.com/redballoonsecurity/ofrak/pull/599)
+- Fixed import error when entropy c library is not found ([#605](https://github.com/redballoonsecurity/ofrak/pull/605))
+- Python dependencies are not pinned in setup.py ([#613](https://github.com/redballoonsecurity/ofrak/pull/613))
+- Treat `keystone-engine` as `CommandExternalTool` for easier PyPI installations ([#613](https://github.com/redballoonsecurity/ofrak/pull/613))
 
 ### Changed
+- Miscellaneous updates to the documentation. ([#592](https://github.com/redballoonsecurity/ofrak/pull/592))
 - By default, the ofrak log is now `ofrak-YYYYMMDDhhmmss.log` rather than just `ofrak.log` and the name can be specified on the command line ([#480](https://github.com/redballoonsecurity/ofrak/pull/480))
 - In `GzipUnpacker`, use the standard python `zlib` library to compress small files and decompress all files. Use `pigz` if it is installed to compress files 1MB and larger. ([#472](https://github.com/redballoonsecurity/ofrak/pull/472) and [#485](https://github.com/redballoonsecurity/ofrak/pull/485))
 - Change `FreeSpaceModifier` & `PartialFreeSpaceModifier` behavior: an optional stub that isn't free space can be provided and fill-bytes for free space can be specified. ([#409](https://github.com/redballoonsecurity/ofrak/pull/409))
@@ -37,6 +70,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - `build_image.py` supports building Docker images with OFRAK packages from any ancestor directory. ([#425](https://github.com/redballoonsecurity/ofrak/pull/425))
 - Partially reverted [#150](https://github.com/redballoonsecurity/ofrak/pull/150) so entropy C code is called with `ctypes` again, but maintaining the current API and automatic compilation by `setup.py`. ([#482](https://github.com/redballoonsecurity/ofrak/pull/482))
 - Minor update to OFRAK Community License, add OFRAK Pro License ([#478](https://github.com/redballoonsecurity/ofrak/pull/478))
+- Update python to 3.9 as main version used and tested (including in default docker image build) ([#502](https://github.com/redballoonsecurity/ofrak/pull/502))
+- Update OpenJDK to version 17, remove unused qemu package ([#502](https://github.com/redballoonsecurity/ofrak/pull/502))
+- Update resource tag File to inherit from GenericBinary ([#492](https://github.com/redballoonsecurity/ofrak/pull/492))
+- Update auto-run component logic to run all Analyzers, not just the most specific ([#492](https://github.com/redballoonsecurity/ofrak/pull/492))
+- Revamp magic identification for significant speed improvements ([#492](https://github.com/redballoonsecurity/ofrak/pull/492))
+  - Refactor magic identification to use one identifier, named `MagicIdentifier`
+  - Rename `MagicMimeIdentifier` to `MagicMimePattern`, as it is run by `MagicIdentifier`
+  - Rename `MagicDescriptionIdentifier` to `MagicDescriptionPattern`, as it is run by `MagicIdentifier`
+  - Add `RawMagicPattern` to efficiently run custom magic byte search logic within `MagicIdenfifier`
+  - Update registered identifiers to make use of new `MagicIdentifier` for following resource tags: `Apk`, `Bzip2Data`, `CpioFilesystem`, `DeviceTreeBlob`, `Elf`, `Ext2Filesystem`, `Ext3Filesystem`, `Ext4Filesystem`, `GzipData`, `ISO9660Image`, `Jffs2Filesystem`, `LzmaData`, `XzData`, `LzoData`, `OpenWrtTrx`, `Pe`, `RarArchive`, `SevenZFilesystem`, `SquashfsFilesystem`, `TarArchive`, `Ubi`, `Ubifs`, `Uf2File`, `UImage`, `ZipArchive`, `ZlibData`, `ZstdData`
+- Update `Instruction.get_assembly` to by synchronous ([#539](https://github.com/redballoonsecurity/ofrak/issues/539))
+- Update orjson to ~=3.10.12 ([#562](https://github.com/redballoonsecurity/ofrak/pull/562/files))
+- Update `get_only_ancestor` to raise `MultipleResourcesFoundError` if more than one ancestor is found ([#538](https://github.com/redballoonsecurity/ofrak/pull/588))
+- Update `DataSummary` handling so that it is no longer stored in `ResourceModel`, but rather retrievable via `DataSummaryAnalyzer.get_data_summary` ([#598](https://github.com/redballoonsecurity/ofrak/pull/598))
+- Update dependencies: aiohttp>=3.12.14, beartype~=0.20.0, ubi-reader==0.8.12 ([#613](https://github.com/redballoonsecurity/ofrak/pull/613))
+- Add `ofrak_pyghidra` to OFRAK GUI script builder ([#631](https://github.com/redballoonsecurity/ofrak/pull/631))
+- When the user selects the "Decompilation" tab in the GUI, the pane is updated with the decompiled code automatically, without having to click "Analyze" first. ([#639](https://github.com/redballoonsecurity/ofrak/pull/639))
+- Use a single source of truth for the package version ([#640](https://github.com/redballoonsecurity/ofrak/pull/640))
+- Update the behavior of `get_only_descendant_as_view`, `get_descendants_as_view`, `get_ancestors_as_view`, and `get_only_ancestor_as_view` to retrieve all resources that match the filter. ([#642](https://github.com/redballoonsecurity/ofrak/pull/642))
+
+### Deprecated
+- `Resource.flush_to_disk` deprecated in favor of `Resource.flush_data_to_disk`. ([#373](https://github.com/redballoonsecurity/ofrak/pull/373), [#567](https://github.com/redballoonsecurity/ofrak/pull/568))
+
+### Removed
+- Remove `Instruction.disassembly` from `Instruction` class: use `Instruction.get_assembly()` instead ([#539](https://github.com/redballoonsecurity/ofrak/issues/539))
+- Remove `Resource.get_only_sibling`, `Resource.get_only_sibling_as_view` API from Resource ([#641](https://github.com/redballoonsecurity/ofrak/pull/641))
+
+### Security
+- Update aiohttp to 3.10.11 ([#522](https://github.com/redballoonsecurity/ofrak/pull/522))
+- Update Python `cryptography` to version 44.0.3. ([#525](https://github.com/redballoonsecurity/ofrak/pull/525), [#589](https://github.com/redballoonsecurity/ofrak/pull/589), [#613](https://github.com/redballoonsecurity/ofrak/pull/613))
+- Bump `lief` dependency to 0.16.1 to address [vulnerability](https://github.com/redballoonsecurity/ofrak/security/dependabot/31) in lower versions ([#502](https://github.com/redballoonsecurity/ofrak/pull/502), [#562](https://github.com/redballoonsecurity/ofrak/pull/562/files))
+- Update `vite` and `esbuild` to newer versions to address dependabot warnings ([#595](https://github.com/redballoonsecurity/ofrak/pull/595))
 
 ## [3.2.0](https://github.com/redballoonsecurity/ofrak/compare/ofrak-v3.1.0...ofrak-v3.2.0)
 ### Added

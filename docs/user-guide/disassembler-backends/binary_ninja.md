@@ -24,7 +24,7 @@ The recommended Binary Ninja version to use with OFRAK is 3.2.3814. If you are r
 
 === "Docker"
 
-    You need to have a valid **headless** Binary Ninja license to build and run the Docker image. [Read about the environment setup](../../environment-setup.md#binary-ninja) for more details.
+    You need to have a valid **headless** Binary Ninja license to build and run the Docker image.
 
     To build the image, the license should be placed in the project's root directory and named `license.dat`. The serial number needs to be extracted from that file into a file named `serial.txt`. This can be done with the following command:
 
@@ -35,7 +35,7 @@ The recommended Binary Ninja version to use with OFRAK is 3.2.3814. If you are r
       > serial.txt
     ```
 
-    The command `DOCKER_BUILDKIT=1 python3 build_image.py --config ofrak-binary-ninja.yml --base --finish` will build an image using Docker BuildKit secrets so that neither the license nor serial number are exposed in the built Docker image. BuildKit is required for the build to succeed!
+    The command `python3 build_image.py --config ofrak-binary-ninja.yml --base --finish` will build an image using Docker BuildKit secrets so that neither the license nor serial number are exposed in the built Docker image. BuildKit is required for the build to succeed!
 
     The Docker container should be run with the same license file from the installation step. The license can then be mounted into the Docker container at location `/root/.binaryninja/license.dat` by adding the following arguments to the `docker run` command:
 
@@ -62,8 +62,13 @@ The recommended Binary Ninja version to use with OFRAK is 3.2.3814. If you are r
 To use Binary Ninja, you need to discover the components at setup-time with:
 
 ```python
-ofrak = OFRAK(logging.INFO)
-ofrak.injector.discover(ofrak_binary_ninja)
+from ofrak import OFRAK
+import ofrak_binary_ninja
+import ofrak_capstone
+
+ofrak = OFRAK()
+ofrak.discover(ofrak_binary_ninja)
+ofrak.discover(ofrak_capstone)
 ```
 
 !!! warning
@@ -83,7 +88,17 @@ You will need both your original file (`<file_path>`) and the Binary Ninja DataB
 Define a `BinaryNinjaAnalyzerConfig` and manually run the `BinaryNinjaAnalyzer`:
 
 ```python
-async def main(ofrak_context: OFRAKContext,):
+import logging
+from ofrak import OFRAK
+from ofrak import OFRAKContext
+import ofrak_capstone
+import ofrak_binary_ninja
+from ofrak_binary_ninja.components.binary_ninja_analyzer import (
+    BinaryNinjaAnalyzerConfig,
+    BinaryNinjaAnalyzer,
+)
+
+async def main(ofrak_context: OFRAKContext):
     resource = await ofrak_context.create_root_resource_from_file(<file_path>)
     binary_ninja_config = BinaryNinjaAnalyzerConfig(<bndb_file_path>)
     await resource.run(BinaryNinjaAnalyzer, binary_ninja_config)
@@ -91,7 +106,8 @@ async def main(ofrak_context: OFRAKContext,):
 
 if __name__ == "__main__":
     ofrak = OFRAK(logging.INFO)
-    ofrak.injector.discover(ofrak_binary_ninja)
+    ofrak.discover(ofrak_binary_ninja)
+    ofrak.discover(ofrak_capstone)
     ofrak.run(main)
 ```
 

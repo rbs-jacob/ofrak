@@ -304,7 +304,7 @@ export class RemoteResource extends Resource {
   }
 
   async data_summary() {
-    const data_summary_results = await fetch(`${this.uri}/data_summary`, {
+    const summaryData = await fetch(`${this.uri}/data_summary`, {
       method: "POST",
     }).then(async (r) => {
       if (!r.ok) {
@@ -312,7 +312,8 @@ export class RemoteResource extends Resource {
       }
       return r.json();
     });
-    ingest_component_results(data_summary_results, this.resource_list);
+    // For now, just add these in here :)
+    this.attributes["ofrak.core.entropy.entropy.DataSummary"] = summaryData;
     this.update();
   }
 
@@ -646,7 +647,7 @@ export class RemoteResource extends Resource {
     });
   }
 
-  async run_component(component, configtype, response) {
+  async run_component(component, config) {
     const result = await fetch(
       `${this.uri}/run_component?component=${component}`,
       {
@@ -654,7 +655,7 @@ export class RemoteResource extends Resource {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify([configtype, response]),
+        body: JSON.stringify(config),
       }
     ).then(async (r) => {
       if (!r.ok) {

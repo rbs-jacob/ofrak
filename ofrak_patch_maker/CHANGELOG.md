@@ -3,10 +3,11 @@ All notable changes to `ofrak-patch-maker` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/redballoonsecurity/ofrak/tree/master)
+## [4.1.0](https://github.com/redballoonsecurity/ofrak/compare/ofrak-patch-maker-v.4.0.2...ofrak-patch-maker-v.4.1.0) - 2025-10-03
+
 ### Added
 - GNU 32-bit x86 toolchain. ([#405](https://github.com/redballoonsecurity/ofrak/pull/405))
-- SPARC BCC tolchain. ([#462](https://github.com/redballoonsecurity/ofrak/pull/462))
+- SPARC BCC toolchain (x86_64 platforms only) ([#462](https://github.com/redballoonsecurity/ofrak/pull/462), [#405](https://github.com/redballoonsecurity/ofrak/pull/405))
 
 ### Removed
 - Switch from binutils version of linker, bin_parser, assembler for X86_64 to default Debian versions. ([#405](https://github.com/redballoonsecurity/ofrak/pull/405))
@@ -14,10 +15,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 ### Fixed
 - X86_64 toolchain now installs on Docker image builds for AARCH64 hosts. ([#405](https://github.com/redballoonsecurity/ofrak/pull/405))
 - Toolchain now drops the .altinstrs_replacement as well as the .altinstructions section in our generated linker scripts ([#414](https://github.com/redballoonsecurity/ofrak/pull/414))
+- GNU toolchain uses the correct `-fPIE` flag when building relocatable patches ([#590](https://github.com/redballoonsecurity/ofrak/pull/590))
 
 ### Changed
 - Removed `SUBALIGN(0)` for `.bss` sections
 - Minor update to OFRAK Community License, add OFRAK Pro License ([#478](https://github.com/redballoonsecurity/ofrak/pull/478))
+- Install toolchains (x86_64, aarch64 platforms) from source or tarball instead of relying on the Debian package manager ([#405](https://github.com/redballoonsecurity/ofrak/pull/405), [#502](https://github.com/redballoonsecurity/ofrak/pull/502), [#541](https://github.com/redballoonsecurity/ofrak/pull/541), [#562](https://github.com/redballoonsecurity/ofrak/pull/562/files))
+- Deprecate reserving `.bss` space at the FEM linking step with `create_unsafe_bss_segment` method and `unsafe_bss_segment` argument. ([#505](https://github.com/redballoonsecurity/ofrak/pull/505))
+- Determine the correct allocation behavior of sections from ELF flags rather than section names. ([#505](https://github.com/redballoonsecurity/ofrak/pull/505))
+- The PatchMaker Toolchain now includes stdout and stderr in the raised ValueError upon toolchain failure. ([#634](https://github.com/redballoonsecurity/ofrak/pull/634))
 
 ## [4.0.2](https://github.com/redballoonsecurity/ofrak/compare/ofrak-patch-maker-v.4.0.1...ofrak-patch-maker-v.4.0.2)
 ### Fixed
@@ -44,6 +50,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - Extend parsed symbol dictionary to include LinkableSymbolType.
 - Extend AssembledObject and BOM types to include relocation and unresolved symbols.
 - Add separate data sections support to LLVM toolchain, and add general flag for including subsections
+- Add support for big endian in the GNU toolchain
+- Add support for ARM BE8 in the GNU toolchain
 
 ### Changed
 - Switch to standard GCC-like frontend for LLVM, which supports C attribute(weak)
