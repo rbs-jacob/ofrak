@@ -39,20 +39,42 @@ _GHIDRA_AUTO_LOADABLE_FORMATS = [Elf, Ihex, Pe]
 
 @dataclass
 class PyGhidraProject(CachedAnalysis):
-    pass
+    """
+    A resource which may be loaded into PyGhidra and analyzed.
+    """
+
+
+@dataclass
+class PyGhidraAutoLoadProject(PyGhidraProject):
+    """
+    A resource which PyGhidra can automatically load with one of its existing Loaders (e.g. ELF).
+    """
+
+
+@dataclass
+class PyGhidraCustomLoadProject(PyGhidraProject):
+    """
+    A resource which PyGhidra does not have an existing loader for and cannot load automatically.
+    Before analysis, we need to inform PyGhidra of correct processor and segments.
+    """
 
 
 class PyGhidraAnalysisIdentifier(Identifier):
     """
-    Component to identify resources to analyze with Ghidra. If this component is discovered,
-    it will tag all [Program][ofrak.core.program.Program]s as GhidraProjects
+    Tags Program resources for PyGhidra analysis. Auto-loadable formats (ELF, PE, Ihex) get PyGhidraAutoLoadProject tag,
+    others get PyGhidraCustomLoadProject. Enables PyGhidra-based components to run on the resource.
     """
 
-    id = b"GhidraAnalysisIdentifier"
-    targets = (Program, Ihex)
+    id = b"PyGhidraAnalysisIdentifier"
+    targets = (Program,)
 
     async def identify(self, resource: Resource, config=None):
-        resource.add_tag(PyGhidraProject)
+        for tag in _GHIDRA_AUTO_LOADABLE_FORMATS:
+            if resource.has_tag(tag):
+                resource.add_tag(PyGhidraAutoLoadProject)
+                return
+
+        resource.add_tag(PyGhidraCustomLoadProject)
 
 
 @dataclass
@@ -65,20 +87,37 @@ class PyGhidraAnalysisStore(CachedAnalysisStore):
 
 
 class CachedGhidraCodeRegionModifier(CachedGhidraCodeRegionModifier):
-    pass
+    """
+    Modifies code regions while maintaining Ghidra analysis caching and context, preserving Ghidra's
+    understanding of the code structure across modifications. This specialized modifier integrates
+    with Ghidra's analysis database. Use when making modifications that need to maintain Ghidra
+    analysis state, performing iterative modifications within Ghidra workflows, preserving analysis
+    context across changes, or ensuring modifications are reflected in Ghidra's database. Important
+    for maintaining analysis consistency in Ghidra-based workflows.
+    """
 
 
 @dataclass
-class PyGhidraAutoAnalyzerConfig(ComponentConfig):
+class PyGhidraAnalyzerConfig(ComponentConfig):
     decomp: bool
     language: str
 
 
-class PyGhidraAutoAnalyzer(Analyzer[None, PyGhidraProject]):
+class PyGhidraAutoAnalyzer(Analyzer[None, PyGhidraAutoLoadProject]):
+    """
+    Runs Ghidra's comprehensive automated analysis on binaries including disassembly, function
+    boundary detection, control flow analysis, data type propagation, symbol discovery,
+    cross-reference generation, and pattern matching. This is Ghidra's powerful automatic analysis
+    engine that does the heavy lifting. Use for comprehensive initial analysis of unknown
+    executables, automated function discovery in stripped binaries, control flow graph generation,
+    or creating a foundation for further manual analysis. Normally runs automatically in
+    Ghidra-based workflows.
+    """
+
     id = b"PyGhidraAutoAnalyzer"
 
-    targets = (PyGhidraProject,)
-    outputs = (PyGhidraProject,)
+    targets = (PyGhidraAutoLoadProject,)
+    outputs = (PyGhidraAutoLoadProject,)
 
     def __init__(
         self,
@@ -90,13 +129,18 @@ class PyGhidraAutoAnalyzer(Analyzer[None, PyGhidraProject]):
         super().__init__(resource_factory, data_service, resource_service)
         self.analysis_store = analysis_store
 
-    async def analyze(self, resource: Resource, config: PyGhidraAutoAnalyzerConfig = None):
+    async def analyze(self, resource: Resource, config: PyGhidraAnalyzerConfig = None):
         tempdir = mkdtemp(prefix="rbs-pyghidra-bin")
+        await resource.identify()  # useful for checking tags later
+        try:
+            program_attrs = resource.get_attributes(ProgramAttributes)
+            language = _arch_info_to_processor_id(program_attrs)
+        except NotFoundError:
+            language = None
         program_file = os.path.join(tempdir, "program")
-        await resource.flush_data_to_disk(program_file)
+        await resource.flush_data_to_disk(program_file, pack=False)
         if config is None:
             decomp = False
-            language = None
         else:
             decomp = config.decomp
             language = config.language
@@ -105,7 +149,7 @@ class PyGhidraAutoAnalyzer(Analyzer[None, PyGhidraProject]):
                 self.analysis_store.store_analysis(
                     resource.get_id(), unpack(program_file, decomp, language)
                 )
-                return PyGhidraProject()
+                return PyGhidraAutoLoadProject()
 
         program_attrs = resource.get_attributes(ProgramAttributes)
         # Guess that the base address is the min start address of any memory region
@@ -123,7 +167,66 @@ class PyGhidraAutoAnalyzer(Analyzer[None, PyGhidraProject]):
                 base_address=base_address,
             ),
         )
-        return PyGhidraProject()
+        return PyGhidraAutoLoadProject()
+
+
+class PyGhidraCustomLoadAnalyzer(Analyzer[None, PyGhidraCustomLoadProject]):
+    """
+    Runs Ghidra's automated analysis on binaries with custom memory region setup. This analyzer
+    explicitly creates all memory regions from the OFRAK Program's MemoryRegion children in Ghidra
+    before running analysis. Use when analyzing raw firmware or binaries with non-standard memory
+    layouts that Ghidra doesn't automatically detect. This ensures all memory regions are properly
+    created and analyzed, which is critical for firmware with multiple discontinuous memory segments.
+    """
+
+    id = b"PyGhidraCustomLoadAnalyzer"
+
+    targets = (PyGhidraCustomLoadProject,)
+    outputs = (PyGhidraCustomLoadProject,)
+
+    def __init__(
+        self,
+        resource_factory: ResourceFactory,
+        data_service: DataServiceInterface,
+        resource_service: ResourceServiceInterface,
+        analysis_store: PyGhidraAnalysisStore,
+    ):
+        super().__init__(resource_factory, data_service, resource_service)
+        self.analysis_store = analysis_store
+
+    async def analyze(self, resource: Resource, config: PyGhidraAnalyzerConfig):
+        if config is None:
+            try:
+                program_attrs = resource.get_attributes(ProgramAttributes)
+                language = _arch_info_to_processor_id(program_attrs)
+            except NotFoundError:
+                language = None
+            decomp = False
+        else:
+            decomp = config.decomp
+            language = config.language
+
+        # Prepare memory regions data
+        regions = await resource.get_children_as_view(
+            MemoryRegion, r_filter=ResourceFilter.with_tags(MemoryRegion)
+        )
+
+        memory_regions = []
+        for region in regions:
+            region_data = await region.resource.get_data()
+            memory_regions.append(
+                {
+                    "virtual_address": region.virtual_address,
+                    "size": region.size,
+                    "data": region_data,
+                }
+            )
+
+        self.analysis_store.store_analysis(
+            resource.get_id(),
+            unpack(None, decomp, language=language, memory_regions=memory_regions),
+        )
+        return PyGhidraCustomLoadProject()
 
 
 @dataclass
@@ -133,32 +236,77 @@ class PyGhidraCodeRegionUnpackerConfig(ComponentConfig):
 
 
 class PyGhidraCodeRegionUnpacker(CachedCodeRegionUnpacker):
+    """
+    Uses Ghidra's analysis engine to automatically disassemble code regions and identify function
+    boundaries (complex blocks). Ghidra analyzes control flow, recognizes function
+    prologues/epilogues, and determines where functions start and end. Use when you need automated
+    function discovery in executable code, especially for binaries without symbols.
+    """
+
     id = b"PyGhidraCodeRegionUnpacker"
 
     async def unpack(self, resource: Resource, config: PyGhidraCodeRegionUnpackerConfig = None):
         program_r = await resource.get_only_ancestor(ResourceFilter.with_tags(PyGhidraProject))
         if not self.analysis_store.id_exists(program_r.get_id()):
             if config is not None:
-                await program_r.run(
-                    PyGhidraAutoAnalyzer,
-                    config=PyGhidraAutoAnalyzerConfig(
-                        decomp=config.decomp, language=config.language
-                    ),
+                analyzer_config = PyGhidraAnalyzerConfig(
+                    decomp=config.decomp, language=config.language
                 )
             else:
-                await program_r.run(PyGhidraAutoAnalyzer)
+                analyzer_config = None
+            if program_r.has_tag(PyGhidraAutoLoadProject):
+                await program_r.run(
+                    PyGhidraAutoAnalyzer,
+                    config=analyzer_config,
+                )
+            elif program_r.has_tag(PyGhidraCustomLoadProject):
+                await program_r.run(
+                    PyGhidraCustomLoadAnalyzer,
+                    config=analyzer_config,
+                )
+            else:
+                raise ValueError(
+                    f"resource {resource} does not have any tag that allow analysis with the PyGhidra backend."
+                )
         return await super().unpack(resource, config)
 
 
 class PyGhidraComplexBlockUnpacker(CachedComplexBlockUnpacker):
+    """
+    Uses Ghidra to disassemble complete functions (complex blocks) into their constituent basic
+    blocks and data words. Basic blocks are sequences of instructions with a single entry point and
+    single exit point, representing straight-line code between branches. Use when performing control
+    flow analysis to understand branching, loops, and function structure. This enables detailed
+    analysis of how code flows through a function.
+    """
+
     id = b"PyGhidraComplexBlockUnpacker"
 
 
 class PyGhidraBasicBlockUnpacker(CachedBasicBlockUnpacker):
+    """
+    Uses Ghidra to disassemble basic blocks into individual assembly instructions, providing the
+    finest-grained view of executable code. Each instruction is extracted with its mnemonic,
+    operands, and address. Use when you need instruction-level analysis, want to examine specific
+    assembly operations, or are preparing for instruction-level modifications. This is the deepest
+    level of code structure extraction.
+    """
+
     id = b"PyGhidraBasicBlockUnpacker"
 
 
 class PyGhidraDecompilationAnalyzer(CachedDecompilationAnalyzer):
+    """
+    Uses Ghidra's decompiler to convert assembly instructions back into pseudo-C source code,
+    applying data type inference, control flow reconstruction, variable naming, and structural
+    analysis to produce high-level code representations. Use when you need high-level understanding
+    of function behavior, want to analyze complex logic or algorithms, prepare for function
+    reimplementation, or need to understand code quickly. The decompiled code should be verified
+    against disassembly.
+    """
+
+    id = b"PyGhidraDecompilationAnalyzer"
+
     targets = (ComplexBlock,)
     outputs = (DecompilationAnalysis,)
 

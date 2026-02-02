@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ## [Unreleased 0.2.0](https://github.com/redballoonsecurity/ofrak/tree/master)
 
+### Added
+- Add OFRAK requirements, requirement to test mapping, test specifications ([#656](https://github.com/redballoonsecurity/ofrak/pull/656))
+
 ### Changed
 - Minor update to OFRAK Community License, add OFRAK Pro License ([#478](https://github.com/redballoonsecurity/ofrak/pull/478))
 - Move to OpenJDK version 17 with the docker container move to Debian 12 ([#502](https://github.com/redballoonsecurity/ofrak/pull/502))
@@ -15,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - Update `GhidraDecompilationAnalyzer` to match API in ofrak 0.3.0rc10 ([#600](https://github.com/redballoonsecurity/ofrak/pull/600))
 - Handle escape (\) character in the JSON going from Java (Ghidra) to Python ([#604](https://github.com/redballoonsecurity/ofrak/pull/604))
 - Fix Ghidra and pyghidra CodeRegion unpacker to take into account the base address that ghidra sets for PIE executables.([#627](https://github.com/redballoonsecurity/ofrak/pull/627))
+- Pin java version ([#683](https://github.com/redballoonsecurity/ofrak/pull/683))
 
 ## 0.1.1 - 2024-02-15
 ### Added
