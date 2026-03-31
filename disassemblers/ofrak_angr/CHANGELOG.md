@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ## [Unreleased](https://github.com/redballoonsecurity/ofrak/tree/master)
 
+### Removed
+- Remove dead `_create_dependencies` no-op override from `AngrAnalyzer` ([#727](https://github.com/redballoonsecurity/ofrak/pull/727))
+
 ### Fixed
 - Pin Angr dependencies (`networkx` and `msgspec`) ([#676](https://github.com/redballoonsecurity/ofrak/pull/676))
 - Pin pycparser version ([#683](https://github.com/redballoonsecurity/ofrak/pull/683))
