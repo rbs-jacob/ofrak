@@ -65,7 +65,7 @@ async def convert_filesystem(
     target_format: str,
 ) -> None:
     root = await ofrak_context.create_root_resource_from_file(input_path)
-    await root.unpack_recursively()
+    await root.unpack()
 
     for fmt_tag in FORMATS.values():
         root.remove_tag(fmt_tag)
