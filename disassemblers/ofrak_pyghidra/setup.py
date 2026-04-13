@@ -38,7 +38,6 @@ setuptools.setup(
         "ofrak_cached_disassembly>=0.1.0",
         "tqdm>=4.67.1",
         "pyghidra~=2.1.0",
-        "jpype1~=1.6.0",
     ],
     python_requires=">=3.9",
     include_package_data=True,
