@@ -1,10 +1,49 @@
+import asyncio
+import logging
 import struct
+import tempfile312 as tempfile
 from dataclasses import dataclass
+from subprocess import CalledProcessError
+
 from ofrak.component.identifier import Identifier
+from ofrak.component.packer import Packer
+from ofrak.component.unpacker import Unpacker
 from ofrak.core.binary import GenericBinary
-from ofrak.core.filesystem import FilesystemRoot
+from ofrak.core.filesystem import File, Folder, FilesystemRoot, SpecialFileType
+from ofrak.model.component_model import ComponentExternalTool
+from ofrak.model.resource_model import ResourceAttributes
 from ofrak.resource import Resource
 from ofrak_type.range import Range
+from ofrak_type.src.ofrak_type.endianness import Endianness
+
+LOGGER = logging.getLogger(__name__)
+
+
+class _Yaffs2UtilTool(ComponentExternalTool):
+    """
+    yaffs2utils binaries (mkyaffs2/unyaffs2) never exit 0 when run for help
+    (they return 255 regardless), so detect installation by running with no
+    arguments and checking the banner in stdout.
+    """
+
+    def __init__(self, tool: str):
+        super().__init__(tool, "https://code.google.com/archive/p/yaffs2utils/", "")
+
+    async def is_tool_installed(self) -> bool:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self.tool,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+        except FileNotFoundError:
+            return False
+        return self.tool.encode() in stdout
+
+
+MKYAFFS2 = _Yaffs2UtilTool("mkyaffs2")
+UNYAFFS2 = _Yaffs2UtilTool("unyaffs2")
 
 PAGE_SIZES = (512, 1024, 2048, 4096, 8192, 16384)
 MAX_SPARE_SIZE = 512
@@ -36,6 +75,17 @@ class Yaffs2Filesystem(GenericBinary, FilesystemRoot):
     """
 
 
+@dataclass(**ResourceAttributes.DATACLASS_PARAMS)
+class Yaffs2FilesystemAttributes(ResourceAttributes):
+    """
+    Geometry of a YAFFS2 image.
+    """
+
+    page_size: int
+    spare_size: int
+    endian: Endianness
+
+
 class Yaffs2Identifier(Identifier):
     """
     Identify YAFFSv2 filesystem images by checking for valid YAFFS2 object header
@@ -63,6 +113,13 @@ class Yaffs2Identifier(Identifier):
             return
 
         resource.add_tag(Yaffs2Filesystem)
+        resource.add_attributes(
+            Yaffs2FilesystemAttributes(
+                page_size=page_size,
+                spare_size=spare_size,
+                endian=Endianness.BIG_ENDIAN if endian == ">" else Endianness.LITTLE_ENDIAN,
+            )
+        )
 
 
 def detect_page_size(data: bytes) -> int:
@@ -106,3 +163,89 @@ def parse_obj_header(data: bytes, endian: str) -> bool:
         return False
     obj_type, parent_id, name_checksum = struct.unpack_from(f"{endian}IIH", data, 0)
     return (0 <= obj_type < 6) and parent_id > 0 and name_checksum == 0xFFFF
+
+
+class Yaffs2Unpacker(Unpacker[None]):
+    """
+    Extracts files and directories from YAFFS2 images. YAFFS2 is commonly used
+    as the root filesystem in embedded Linux devices built on NAND flash,
+    notably older Android devices and various industrial firmware. The unpacker
+    preserves file permissions, ownership, symbolic links, and special files.
+    """
+
+    targets = (Yaffs2Filesystem,)
+    children = (File, Folder, SpecialFileType)
+    external_dependencies = (UNYAFFS2,)
+
+    async def unpack(self, resource: Resource, config=None):
+        attrs = await _get_yaffs2_attributes(resource)
+        async with resource.temp_to_disk() as temp_path:
+            with tempfile.TemporaryDirectory() as temp_flush_dir:
+                cmd = [
+                    "unyaffs2",
+                    "-p",
+                    str(attrs.page_size),
+                    "-s",
+                    str(attrs.spare_size),
+                    *endian_arg(attrs),
+                    temp_path,
+                    temp_flush_dir,
+                ]
+                proc = await asyncio.create_subprocess_exec(*cmd)
+                returncode = await proc.wait()
+                if proc.returncode:
+                    raise CalledProcessError(returncode=returncode, cmd=cmd)
+                view = await resource.view_as(Yaffs2Filesystem)
+                await view.initialize_from_disk(temp_flush_dir)
+
+
+class Yaffs2Packer(Packer[None]):
+    """
+    Packages files into a YAFFS2 image. The packer preserves Unix permissions,
+    ownership, symbolic links, and special files, and writes the image using the
+    same page size, spare size, and endianness detected at unpack time.
+    """
+
+    targets = (Yaffs2Filesystem,)
+    external_dependencies = (MKYAFFS2,)
+
+    async def pack(self, resource: Resource, config=None):
+        attrs = await _get_yaffs2_attributes(resource)
+        view: Yaffs2Filesystem = await resource.view_as(Yaffs2Filesystem)
+        temp_flush_dir = await view.flush_to_disk()
+        with tempfile.NamedTemporaryFile(
+            suffix=".yaffs2", mode="rb", delete_on_close=False
+        ) as temp:
+            temp.close()
+            cmd = [
+                "mkyaffs2",
+                "-p",
+                str(attrs.page_size),
+                "-s",
+                str(attrs.spare_size),
+                *endian_arg(attrs),
+                temp_flush_dir,
+                temp.name,
+            ]
+            proc = await asyncio.create_subprocess_exec(*cmd)
+            returncode = await proc.wait()
+            if proc.returncode:
+                raise CalledProcessError(returncode=returncode, cmd=cmd)
+            with open(temp.name, "rb") as new_fh:
+                new_data = new_fh.read()
+            resource.queue_patch(Range(0, await resource.get_data_length()), new_data)
+
+
+async def _get_yaffs2_attributes(resource: Resource) -> Yaffs2FilesystemAttributes:
+    if resource.has_attributes(Yaffs2FilesystemAttributes):
+        return resource.get_attributes(Yaffs2FilesystemAttributes)
+    return Yaffs2FilesystemAttributes(
+        page_size=2048,
+        spare_size=64,
+        endian=Endianness.LITTLE_ENDIAN,
+    )
+
+
+def endian_arg(attrs: Yaffs2FilesystemAttributes) -> list:
+    # mkyaffs2/unyaffs2 use -e to swap from the host (little-endian) byte order.
+    return ["-e"] if attrs.endian == Endianness.BIG_ENDIAN else []
