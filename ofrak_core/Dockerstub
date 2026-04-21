@@ -11,6 +11,7 @@ RUN apt-get -y update && \
       build-essential \
       cmake \
       cpio \
+      curl \
       git \
       genisoimage \
       liblz4-dev \
