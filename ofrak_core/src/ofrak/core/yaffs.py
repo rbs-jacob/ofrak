@@ -14,7 +14,7 @@ from ofrak.model.component_model import ComponentExternalTool
 from ofrak.model.resource_model import ResourceAttributes
 from ofrak.resource import Resource
 from ofrak_type.range import Range
-from ofrak_type.src.ofrak_type.endianness import Endianness
+from ofrak_type.endianness import Endianness
 
 LOGGER = logging.getLogger(__name__)
 
