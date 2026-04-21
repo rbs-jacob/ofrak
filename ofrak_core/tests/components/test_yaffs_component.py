@@ -39,7 +39,7 @@ EXPECTED_DATA = b"Hello ofrak!\n"
 class TestYaffs2UnpackModifyPack(UnpackModifyPackPattern):
     """
     Unpack a real YAFFS2 image, modify a contained file, repack, and verify the
-    result by extracting it again with ``unyaffs2``.
+    result by extracting it again with `unyaffs2`.
     """
 
     @pytest.fixture(autouse=True)
