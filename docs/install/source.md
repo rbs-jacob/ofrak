@@ -7,7 +7,7 @@ Install OFRAK from source code for development or contribution.
 - Python 3.9+ and pip
 - Git with [Git LFS](https://git-lfs.github.com/) installed ([installation instructions](https://github.com/git-lfs/git-lfs#installing))
 - make
-- cmake and libmagic 5.46 (macOS only - libmagic 5.47 has a known regression affecting ELF identification; see [macOS libmagic install](#macos-libmagic-install) below)
+- cmake and libmagic (macOS only - install via `brew install cmake libmagic` - libmagic 5.47 has a known regression affecting ELF identification, ensure libmagic!=5.47 after installing; see [macOS libmagic install](#macos-libmagic-install) for more information)
 
 ## Clone
 
@@ -105,14 +105,22 @@ make requirements-build-docker
 
 ### macOS libmagic Install
 
-libmagic 5.47 contains a regression where ELF files are identified as `ELF` instead of `ELF ` (with trailing space), which breaks OFRAK's ELF identification. Install libmagic 5.46 via a custom Homebrew tap:
+libmagic 5.47 contains a regression where ELF files are identified as `ELF` instead of `ELF ` (with trailing space), which breaks OFRAK's ELF identification. If you run into issues with ELF files in OFRAK, first check your libmagic version:
 
 ```bash
-brew install cmake
-curl -O https://raw.githubusercontent.com/Homebrew/homebrew-core/b8292ac3475e57ca407db18dfeb131cc51116da2/Formula/lib/libmagic.rb
-brew tap-new local/ofrak-libmagic
-cp libmagic.rb $(brew --repository)/Library/Taps/local/homebrew-ofrak-libmagic/Formula/
-brew install local/ofrak-libmagic/libmagic
+brew info libmagic
+==> libmagic: stable 5.48 (bottled)
+Implementation of the file(1) command
+https://www.darwinsys.com/file/
+Installed (on request)
+From: https://github.com/Homebrew/homebrew-core/blob/HEAD/Formula/lib/libmagic.rb
+...
+```
+
+If brew returns 5.47 for the libmagic version, update libmagic with:
+
+```bash
+brew upgrade libmagic
 ```
 
 ### keystone-engine Import Error on macOS (M1/M2)
